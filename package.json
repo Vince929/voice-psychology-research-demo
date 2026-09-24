@@ -9,7 +9,7 @@
   "scripts": {
     "mobile:start": "npm --workspace @voice-psychology/mobile run start",
     "mobile:android": "npm --workspace @voice-psychology/mobile run android",
-    "mobile:ios": "npm --workspace @voice-psychology/mobile run ios",
+    "mobile:android:usb": "npm --workspace @voice-psychology/mobile run android:usb",
     "api:dev": "cd apps/api && uvicorn app.main:app --reload"
   }
 }

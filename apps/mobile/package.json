@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "android:usb": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:8000 tcp:8000 && react-native run-android",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest"
