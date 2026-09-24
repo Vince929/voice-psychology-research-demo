@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import {
   CollectionRecord,
@@ -113,16 +113,22 @@ export function RecordManagement({onStartNew}: RecordManagementProps) {
         </View>
       ))}
       <PrimaryButton label="开始新的采集" onPress={onStartNew} />
-      {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
+      <Modal visible={selectedRecord !== null} animationType="slide" transparent onRequestClose={() => setSelectedRecord(null)}>
+        {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
+      </Modal>
     </View>
   );
 }
 
 function RecordDetail({record, onClose, onPlay, onDeleteRecord, onDeleteSubject}: {record: CollectionRecord; onClose: () => void; onPlay: () => void; onDeleteRecord: () => void; onDeleteSubject: () => void}) {
   return (
-    <View style={styles.overlay}>
-      <ScrollView contentContainerStyle={styles.detailSheet}>
-        <Text style={styles.heading}>记录详情</Text>
+    <View style={styles.modalBackdrop}>
+      <View style={styles.detailSheet}>
+        <View style={styles.detailHeader}>
+          <Text style={styles.heading}>记录详情</Text>
+          <Pressable style={styles.backButton} onPress={onClose}><Text style={styles.backButtonText}>返回列表</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={styles.detailContent}>
         <Text style={styles.detailText}>匿名编号：{record.subject_id}</Text>
         <Text style={styles.detailText}>年龄段：{record.age_group || '未填写'} · 性别：{record.gender || '未填写'}</Text>
         <Text style={styles.detailText}>采集时间：{formatTime(record.created_at)}</Text>
@@ -134,8 +140,9 @@ function RecordDetail({record, onClose, onPlay, onDeleteRecord, onDeleteSubject}
         <PrimaryButton label="播放音频" onPress={onPlay} />
         <ActionButton label="删除本条记录" destructive onPress={onDeleteRecord} />
         <ActionButton label="删除该受试者全部数据" destructive onPress={onDeleteSubject} />
-        <Pressable onPress={onClose}><Text style={styles.link}>关闭详情</Text></Pressable>
-      </ScrollView>
+        <Pressable onPress={onClose}><Text style={styles.link}>返回记录列表</Text></Pressable>
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -149,5 +156,5 @@ function ActionButton({label, destructive, onPress}: {label: string; destructive
 }
 
 const styles = StyleSheet.create({
-  section: {gap: 16}, heading: {fontSize: 24, fontWeight: '800', color: '#163C36'}, body: {fontSize: 16, lineHeight: 25, color: '#385650'}, button: {alignItems: 'center', padding: 16, backgroundColor: '#1B6559', borderRadius: 12}, buttonDisabled: {backgroundColor: '#9DB6B0'}, buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'}, empty: {textAlign: 'center', padding: 30, color: '#4A716B'}, recordCard: {gap: 8, padding: 16, borderRadius: 12, backgroundColor: '#FFFFFF'}, recordTitle: {fontSize: 18, fontWeight: '800', color: '#163C36'}, recordMeta: {fontSize: 14, color: '#4A716B'}, actionRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4}, actionButton: {paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: '#E1EEEA'}, actionButtonDestructive: {backgroundColor: '#FBE7E5'}, actionButtonText: {fontWeight: '700', color: '#1B6559'}, actionButtonTextDestructive: {color: '#A43F35'}, overlay: {position: 'absolute', inset: 0, backgroundColor: 'rgba(19, 51, 47, 0.36)', justifyContent: 'flex-end'}, detailSheet: {gap: 14, padding: 24, backgroundColor: '#F8FBFA', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%'}, detailHeading: {fontSize: 16, fontWeight: '800', color: '#163C36', marginTop: 4}, detailText: {fontSize: 15, lineHeight: 23, color: '#385650'}, link: {textAlign: 'center', color: '#1B6559', fontWeight: '700', padding: 10},
+  section: {gap: 16}, heading: {fontSize: 24, fontWeight: '800', color: '#163C36'}, body: {fontSize: 16, lineHeight: 25, color: '#385650'}, button: {alignItems: 'center', padding: 16, backgroundColor: '#1B6559', borderRadius: 12}, buttonDisabled: {backgroundColor: '#9DB6B0'}, buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'}, empty: {textAlign: 'center', padding: 30, color: '#4A716B'}, recordCard: {gap: 8, padding: 16, borderRadius: 12, backgroundColor: '#FFFFFF'}, recordTitle: {fontSize: 18, fontWeight: '800', color: '#163C36'}, recordMeta: {fontSize: 14, color: '#4A716B'}, actionRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4}, actionButton: {paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: '#E1EEEA'}, actionButtonDestructive: {backgroundColor: '#FBE7E5'}, actionButtonText: {fontWeight: '700', color: '#1B6559'}, actionButtonTextDestructive: {color: '#A43F35'}, modalBackdrop: {flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(19, 51, 47, 0.36)'}, detailSheet: {maxHeight: '90%', paddingTop: 20, backgroundColor: '#F8FBFA', borderTopLeftRadius: 24, borderTopRightRadius: 24}, detailHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingBottom: 14}, backButton: {paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: '#E1EEEA'}, backButtonText: {fontWeight: '700', color: '#1B6559'}, detailContent: {gap: 14, paddingHorizontal: 24, paddingBottom: 32}, detailHeading: {fontSize: 16, fontWeight: '800', color: '#163C36', marginTop: 4}, detailText: {fontSize: 15, lineHeight: 23, color: '#385650'}, link: {textAlign: 'center', color: '#1B6559', fontWeight: '700', padding: 10},
 });
