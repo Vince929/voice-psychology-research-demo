@@ -5,6 +5,7 @@ npm-debug.log*
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 
 # Environment and local data

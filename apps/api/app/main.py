@@ -90,11 +90,20 @@ def list_records(db: Session = Depends(get_db)) -> list[dict]:
 
 
 @app.get("/api/record/{record_id}")
-def get_record(record_id: int, db: Session = Depends(get_db)) -> CollectionRecord:
+def get_record(record_id: int, db: Session = Depends(get_db)) -> dict:
     record = db.get(CollectionRecord, record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
-    return record
+    return {
+        "id": record.id,
+        "subject_id": record.subject_id,
+        "age_group": record.age_group,
+        "gender": record.gender,
+        "phq9_answers": record.phq9_answers,
+        "mbti_answers": record.mbti_answers,
+        "analysis_result": record.analysis_result,
+        "created_at": record.created_at,
+    }
 
 
 @app.get("/api/audio/{record_id}")
