@@ -11,18 +11,20 @@ import {
   View,
 } from 'react-native';
 
-import {MBTI_QUESTIONS, PHQ9_QUESTIONS} from './src/types/assessment';
+import {RecordManagement} from './src/components/RecordManagement';
 import {checkApiHealth, submitRecord} from './src/services/api';
 import {requestMicrophonePermission, startRecording, stopRecording} from './src/services/recorder';
+import {MBTI_QUESTIONS, PHQ9_QUESTIONS} from './src/types/assessment';
 
-type Step = 'consent' | 'subject' | 'phq9' | 'mbti' | 'record';
-const STEPS: Step[] = ['consent', 'subject', 'phq9', 'mbti', 'record'];
+type Step = 'consent' | 'subject' | 'phq9' | 'mbti' | 'record' | 'records';
+const STEPS: Exclude<Step, 'records'>[] = ['consent', 'subject', 'phq9', 'mbti', 'record'];
 const STEP_TITLE: Record<Step, string> = {
   consent: '知情同意',
   subject: '匿名信息',
   phq9: 'PHQ-9 问卷',
   mbti: '偏好问卷',
   record: '语音采集',
+  records: '本地记录',
 };
 
 function createSubjectId() {
@@ -42,22 +44,33 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
 
   const phq9Score = useMemo(() => Object.values(phq9).reduce((sum, value) => sum + value, 0), [phq9]);
-  const moveTo = (next: Step) => setStep(next);
+
+  function resetCollection() {
+    setSubjectId(createSubjectId());
+    setAgeGroup('18-24');
+    setGender('不透露');
+    setPhq9({});
+    setMbti({});
+    setAudioUri('');
+  }
 
   async function toggleRecording() {
-    if (recording) {
-      const uri = await stopRecording();
-      setAudioUri(uri);
+    try {
+      if (recording) {
+        setAudioUri(await stopRecording());
+        setRecording(false);
+        return;
+      }
+      if (!await requestMicrophonePermission()) {
+        Alert.alert('无法录音', '请在系统设置中授予麦克风权限后重试。');
+        return;
+      }
+      await startRecording();
+      setRecording(true);
+    } catch {
       setRecording(false);
-      return;
+      Alert.alert('录音失败', '录音服务不可用或已被系统中断，请重新尝试。');
     }
-    const granted = await requestMicrophonePermission();
-    if (!granted) {
-      Alert.alert('无法录音', '请在系统设置中授予麦克风权限后重试。');
-      return;
-    }
-    await startRecording();
-    setRecording(true);
   }
 
   async function upload() {
@@ -68,8 +81,8 @@ export default function App() {
     setSubmitting(true);
     try {
       await submitRecord({subject: {subject_id: subjectId, age_group: ageGroup, gender}, phq9, mbti}, audioUri);
-      Alert.alert('已保存', '音频和问卷已保存至本地研究服务。');
-      setAudioUri('');
+      resetCollection();
+      setStep('records');
     } catch {
       Alert.alert('提交失败', '请确认本地 FastAPI 服务已启动，并使用 Android 模拟器地址 10.0.2.2:8000。');
     } finally {
@@ -92,7 +105,7 @@ export default function App() {
       <View style={styles.header}>
         <Text style={styles.kicker}>VOICE RESEARCH DEMO</Text>
         <Text style={styles.title}>语音心理科研采集</Text>
-        <Text style={styles.subtitle}>{STEP_TITLE[step]} · 第 {STEPS.indexOf(step) + 1} / {STEPS.length} 步</Text>
+        <Text style={styles.subtitle}>{step === 'records' ? '已保存的本地采集数据' : `${STEP_TITLE[step]} · 第 ${STEPS.indexOf(step as Exclude<Step, 'records'>) + 1} / ${STEPS.length} 步`}</Text>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
         {step === 'consent' && (
@@ -103,7 +116,7 @@ export default function App() {
               <Text style={styles.checkIcon}>{consented ? '✓' : '○'}</Text>
               <Text style={styles.checkText}>我已阅读并同意本科研采集协议</Text>
             </Pressable>
-            <PrimaryButton label="进入实验" disabled={!consented} onPress={() => moveTo('subject')} />
+            <PrimaryButton label="进入实验" disabled={!consented} onPress={() => setStep('subject')} />
           </View>
         )}
         {step === 'subject' && (
@@ -113,7 +126,7 @@ export default function App() {
             <Field label="匿名编号" value={subjectId} onChangeText={setSubjectId} />
             <Choice label="年龄段" value={ageGroup} choices={['18-24', '25-34', '35-44', '45+']} onChange={setAgeGroup} />
             <Choice label="性别" value={gender} choices={['女', '男', '不透露']} onChange={setGender} />
-            <PrimaryButton label="继续填写问卷" onPress={() => moveTo('phq9')} />
+            <PrimaryButton label="继续填写问卷" onPress={() => setStep('phq9')} />
           </View>
         )}
         {step === 'phq9' && (
@@ -127,7 +140,7 @@ export default function App() {
                 <Choice value={String(phq9[index])} choices={['0', '1', '2', '3']} onChange={value => setPhq9({...phq9, [index]: Number(value)})} />
               </View>
             ))}
-            <PrimaryButton label="继续" disabled={Object.keys(phq9).length !== PHQ9_QUESTIONS.length} onPress={() => moveTo('mbti')} />
+            <PrimaryButton label="继续" disabled={Object.keys(phq9).length !== PHQ9_QUESTIONS.length} onPress={() => setStep('mbti')} />
           </View>
         )}
         {step === 'mbti' && (
@@ -140,7 +153,7 @@ export default function App() {
                 <Choice value={mbti[question.id]} choices={question.options} onChange={value => setMbti({...mbti, [question.id]: value})} />
               </View>
             ))}
-            <PrimaryButton label="进入语音采集" disabled={Object.keys(mbti).length !== MBTI_QUESTIONS.length} onPress={() => moveTo('record')} />
+            <PrimaryButton label="进入语音采集" disabled={Object.keys(mbti).length !== MBTI_QUESTIONS.length} onPress={() => setStep('record')} />
           </View>
         )}
         {step === 'record' && (
@@ -151,9 +164,11 @@ export default function App() {
             <PrimaryButton label={recording ? '停止录音' : audioUri ? '重新录音' : '开始录音'} onPress={toggleRecording} />
             {audioUri ? <Text style={styles.success}>录音已就绪，可提交。</Text> : null}
             <PrimaryButton label={submitting ? '正在保存…' : '提交本次采集'} disabled={!audioUri || submitting || recording} onPress={upload} />
+            <Pressable onPress={() => setStep('records')}><Text style={styles.link}>查看本地采集记录</Text></Pressable>
             <Pressable onPress={verifyService}><Text style={styles.link}>检查本地数据库服务</Text></Pressable>
           </View>
         )}
+        {step === 'records' ? <RecordManagement onStartNew={() => setStep('subject')} /> : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -164,7 +179,7 @@ function Field({label, value, onChangeText}: {label: string; value: string; onCh
 }
 
 function Choice({label, value, choices, onChange}: {label?: string; value?: string; choices: string[]; onChange: (value: string) => void}) {
-  return <View style={styles.field}><Text style={styles.label}>{label}</Text><View style={styles.choiceGroup}>{choices.map(choice => <Pressable key={choice} style={[styles.choice, value === choice && styles.choiceActive]} onPress={() => onChange(choice)}><Text style={[styles.choiceText, value === choice && styles.choiceTextActive]}>{choice}</Text></Pressable>)}</View></View>;
+  return <View style={styles.field}>{label ? <Text style={styles.label}>{label}</Text> : null}<View style={styles.choiceGroup}>{choices.map(choice => <Pressable key={choice} style={[styles.choice, value === choice && styles.choiceActive]} onPress={() => onChange(choice)}><Text style={[styles.choiceText, value === choice && styles.choiceTextActive]}>{choice}</Text></Pressable>)}</View></View>;
 }
 
 function PrimaryButton({label, disabled, onPress}: {label: string; disabled?: boolean; onPress: () => void}) {

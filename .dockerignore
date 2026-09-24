@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+apps/mobile/node_modules
+apps/mobile/android/.gradle
+apps/mobile/android/app/build
+apps/api/.venv
+apps/api/__pycache__
+apps/api/app/__pycache__
+apps/api/.env
+apps/api/demo.db
+apps/api/upload_audio
+data
+*.pyc
+.DS_Store

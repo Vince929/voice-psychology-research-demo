@@ -9,10 +9,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from .config import ENABLE_DEEPSEEK_ANALYSIS, UPLOAD_AUDIO_DIR
-from .database import Base, engine, get_db
+from .database import get_db
 from .models import CollectionRecord
 
-Base.metadata.create_all(bind=engine)
 UPLOAD_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(

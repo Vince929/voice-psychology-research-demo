@@ -13,6 +13,7 @@ __pycache__/
 apps/api/.env
 apps/api/demo.db
 apps/api/upload_audio/
+data/upload_audio/
 
 # OS
 .DS_Store
