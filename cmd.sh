@@ -9,7 +9,8 @@ usage() {
 Usage: ./cmd.sh [command]
 
   (no args), api       Start the FastAPI service at http://127.0.0.1:8000
-  mobile, android      Build, install and start the Android app
+  mobile, android      Build, install and start the Android app in emulator mode
+  usb                  Configure USB port reverse and start the Android app on a device
   metro                Start the React Native Metro server only
   help, -h, --help     Show this help
 EOF
@@ -33,6 +34,10 @@ case "${1:-api}" in
   mobile|android)
     cd "$PROJECT_ROOT"
     exec npm run mobile:android
+    ;;
+  usb)
+    cd "$PROJECT_ROOT"
+    exec npm run mobile:android:usb
     ;;
   metro)
     cd "$PROJECT_ROOT"
