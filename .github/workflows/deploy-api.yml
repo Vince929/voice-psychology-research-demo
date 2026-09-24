@@ -65,8 +65,12 @@ jobs:
             upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
             upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
 
-            export MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}"
             export MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}"
+            if [[ -z "$MYSQL_PASSWORD" ]]; then
+              echo "MYSQL_PASSWORD GitHub Secret must be configured" >&2
+              exit 1
+            fi
+            export MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD"
             export MYSQL_DATABASE="voice_psychology_demo"
             export MYSQL_USER="voice_demo_app"
             docker compose -f docker-compose.prod.yml build api
