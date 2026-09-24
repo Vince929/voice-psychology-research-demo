@@ -31,8 +31,15 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             set -e
-            cd ~/voice-psychology-research-demo
-            git pull origin master
+            APP_DIR="$HOME/voice-psychology-research-demo"
+            REPOSITORY_URL="${{ github.server_url }}/${{ github.repository }}.git"
+
+            if [[ ! -d "$APP_DIR/.git" ]]; then
+              git clone --branch master --single-branch "$REPOSITORY_URL" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git pull --ff-only origin master
 
             ENV_FILE="apps/api/.env"
             touch "$ENV_FILE"
