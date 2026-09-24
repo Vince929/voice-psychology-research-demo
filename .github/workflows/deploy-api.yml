@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - 'apps/api/**'
+      - 'db/migrations/**'
       - 'docker-compose.prod.yml'
       - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
@@ -69,7 +70,10 @@ jobs:
             export MYSQL_DATABASE="voice_psychology_demo"
             export MYSQL_USER="voice_demo_app"
             docker compose -f docker-compose.prod.yml build api
-            docker compose -f docker-compose.prod.yml up -d --wait mysql
+            if ! docker compose -f docker-compose.prod.yml up -d --wait mysql; then
+              docker compose -f docker-compose.prod.yml logs mysql
+              exit 1
+            fi
             docker compose -f docker-compose.prod.yml run --rm --no-deps api sh -c 'yoyo apply --batch --database "$(printf "%s" "$DATABASE_URL" | sed "s#^mysql+pymysql:#mysql:#")" db/migrations'
             docker compose -f docker-compose.prod.yml up -d api
 
