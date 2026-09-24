@@ -11,5 +11,8 @@
     "mobile:android": "npm --workspace @voice-psychology/mobile run android",
     "mobile:android:usb": "npm --workspace @voice-psychology/mobile run android:usb",
     "api:dev": "cd apps/api && uvicorn app.main:app --reload"
+  },
+  "dependencies": {
+    "react-native-nitro-modules": "0.29.2"
   }
 }

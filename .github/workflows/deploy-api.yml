@@ -47,15 +47,18 @@ jobs:
               fi
             }
 
-            upsert_env "DATABASE_URL" "mysql+pymysql://voice_demo_app:${{ vars.MYSQL_PASSWORD }}@mysql:3306/voice_psychology_demo?charset=utf8mb4"
-            upsert_env "UPLOAD_AUDIO_DIR" "/app/upload_audio"
-            upsert_env "ENABLE_DEEPSEEK_ANALYSIS" "${{ vars.ENABLE_DEEPSEEK_ANALYSIS }}"
-            upsert_env "DEEPSEEK_API_KEY" "${{ vars.DEEPSEEK_API_KEY }}"
+            upsert_env "DATABASE_URL" "mysql+pymysql://voice_demo_app:${{ secrets.MYSQL_PASSWORD }}@mysql:3306/voice_psychology_demo?charset=utf8mb4"
+            upsert_env "AUDIO_COS_BUCKET" "${{ vars.AUDIO_COS_BUCKET }}"
+            upsert_env "AUDIO_COS_REGION" "${{ vars.AUDIO_COS_REGION }}"
+            upsert_env "AUDIO_COS_SECRET_ID" "${{ vars.AUDIO_COS_SECRET_ID }}"
+            upsert_env "AUDIO_COS_SECRET_KEY" "${{ vars.AUDIO_COS_SECRET_KEY }}"
+            upsert_env "AUDIO_COS_KEY_PREFIX" "${{ vars.AUDIO_COS_KEY_PREFIX }}"
+            upsert_env "DEEPSEEK_API_KEY" "${{ secrets.DEEPSEEK_API_KEY }}"
             upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
             upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
 
-            export MYSQL_ROOT_PASSWORD="${{ vars.MYSQL_ROOT_PASSWORD }}"
-            export MYSQL_PASSWORD="${{ vars.MYSQL_PASSWORD }}"
+            export MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}"
+            export MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}"
             export MYSQL_DATABASE="voice_psychology_demo"
             export MYSQL_USER="voice_demo_app"
             docker compose -f docker-compose.prod.yml build api

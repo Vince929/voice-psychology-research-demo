@@ -8,8 +8,6 @@ services:
       - "127.0.0.1:8082:8000"
     env_file:
       - apps/api/.env
-    volumes:
-      - ./data/upload_audio:/app/upload_audio
     depends_on:
       mysql:
         condition: service_healthy

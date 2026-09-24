@@ -63,7 +63,7 @@ flowchart LR
     A[RN App] -->|HTTPS 同域名:8443| B[Nginx]
     B -->|127.0.0.1:8082| C[语音采集 FastAPI]
     C --> D[(MySQL 容器<br/>voice_psychology_demo)]
-    C --> E[宿主机挂载目录<br/>data/upload_audio]
+    C --> E[腾讯云 COS<br/>voice-psychology/audio]
     F[Vince 后端] --> G[(Vince 独立 MySQL)]
 ```
 
@@ -71,37 +71,18 @@ flowchart LR
 
 ```dotenv
 DATABASE_URL=mysql+pymysql://voice_demo_app:<URL编码后的密码>@mysql:3306/voice_psychology_demo?charset=utf8mb4
-UPLOAD_AUDIO_DIR=/app/upload_audio
-ENABLE_DEEPSEEK_ANALYSIS=false
-DEEPSEEK_API_KEY=<仅后端可读的密钥>
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
+AUDIO_COS_BUCKET=<COS桶名称>
+AUDIO_COS_REGION=ap-shanghai
+AUDIO_COS_SECRET_ID=<COS SecretId>
+AUDIO_COS_SECRET_KEY=<COS SecretKey>
+AUDIO_COS_KEY_PREFIX=voice-psychology
 ```
 
-GitHub 仓库中不提交 `apps/api/.env`，实际值由部署工作流同步到服务器。工作流沿用 Vince 的 SSH Secrets：`SERVER_HOST`、`SERVER_USER`、`SERVER_SSH_KEY`；并使用同名风格的 Variables：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`、`ENABLE_DEEPSEEK_ANALYSIS`。本期不要求把 MySQL、音频目录或 DeepSeek Key 暴露到公网；正式采集前仍需确认服务器容量、备份与恢复策略、访问控制及科研伦理/数据合规要求。
- 
-三、全局开关配置
- 
-后端全局配置  config.py 
- 
-python
-  
+GitHub 仓库中不提交 `apps/api/.env`，实际值由部署工作流同步到服务器。工作流沿用 Vince 的 SSH Secrets：`SERVER_HOST`、`SERVER_USER`、`SERVER_SSH_KEY`；实际的 MySQL、COS 与 DeepSeek 配置通过 GitHub Actions 环境变量注入。本期不要求把 MySQL、COS 音频对象或 DeepSeek Key 暴露到公网；正式采集前仍需确认服务器容量、备份与恢复策略、访问控制及科研伦理/数据合规要求。
 
-# 全局调试开关，【默认 False】（面试演示模式）
-ENABLE_DEEPSEEK_ANALYSIS = False
- 
+当前版本不实现 DeepSeek 调用或向客户端返回任何心理分析结果；录音与问卷仅用于科研采集和受控存储。未来如需要接入分析能力，应通过明确的独立需求实现，不能以运行时开关改变当前采集流程。
  
-1. 开关 = False（默认，面试演示）
-- 不会调用DeepSeek接口；只存储音频、问卷数据；接口不会返回任何AI心理分析结果；严格对齐科研伦理。
-2. 开关 = True（开发者本地把玩）
-- 收到RN上传的音频元数据+问卷结果，调用DeepSeek API做模拟心理分析；
-- 返回分析结果给到RN前端；
-- 返回的JSON字段必须附带标记： warning: "⚠️调试模拟结果，Demo原型，非真实科研/医疗诊断，仅供演示" 
-- 注释：真实科研项目不会使用通用大模型做心理评估；此逻辑仅Demo演示闭环，生产需要替换为自研声学AI模型。
- 
-提示：Demo不做音频声学特征提取，简化方案：把问卷作答内容提交给DeepSeek做分析（不去解析音频波形，降低Demo复杂度）。真实科研是提取eGeMAPS声学特征送入模型。
- 
-四、完整业务流转
+三、完整业务流转
  
 plaintext
   
@@ -113,10 +94,9 @@ RN App启动
 → Page4：简化MBTI问卷
 → Page5：语音录音采集页面（核心页面）
 → RN：录音结束，AAC音频文件 + 问卷全部数据，multipart/form‑data POST上传到本地FastAPI后端
-→ FastAPI：保存音频到受控持久化磁盘，问卷/元数据写入 MySQL 数据库
-→ 如果 ENABLE_DEEPSEEK_ANALYSIS=True：后端将问卷信息传给DeepSeek，获取模拟心理分析结果存入数据库
-→ RN跳转 Page6：本地记录列表页
-→ RN可请求后端接口：查看记录、下载播放音频、查看问卷；调试开关开启时展示DeepSeek返回的模拟分析；支持删除单条/受试者全部数据
+→ FastAPI：将音频上传到腾讯云 COS，问卷/元数据及 COS 对象 Key 写入 MySQL 数据库
+→ RN跳转 Page6：记录列表页
+→ RN可请求后端接口：查看记录、播放 COS 音频流、查看问卷；支持删除单条/受试者全部数据
  
  
 五、RN移动端页面需求
@@ -143,7 +123,7 @@ Page3 PHQ‑9抑郁量表页面
 Page4 简化MBTI问卷页面
  
 1. 少量MBTI经典二选一题目；
-2. 保存全部选项；开关关闭状态下，只展示维度计数，不输出人格标签。
+2. 保存全部选项，仅展示维度计数，不输出人格标签。
  
 Page5 语音录音核心页面（Demo重点）
  
@@ -177,7 +157,7 @@ Page6 记录管理列表页
  
 注释： // 伦理审查硬性需求：受试者可随时销毁本人全部实验数据 
  
-当后端 ENABLE_DEEPSEEK_ANALYSIS = true ：详情页展示模拟AI分析面板，大字号警告文案：⚠️调试模拟结果，Demo原型，非真实医疗诊断，仅供演示；开关关闭，该面板完全隐藏。
+详情页不展示任何 AI 心理分析面板或预测结果。
  
 六、FastAPI后端接口清单
  
@@ -186,22 +166,10 @@ Page6 记录管理列表页
 1.  POST /api/submit_record 
 multipart/form‑data：音频文件、受试者json信息、phq9问卷、mbti问卷
  
-- 保存音频到配置的 `UPLOAD_AUDIO_DIR`；写入 MySQL；
-- 如果开关打开，组装Prompt调用DeepSeek API，得到模拟心理分析结果入库；
-- 返回记录ID。
- 
-DeepSeek调用Prompt示例（写在后端代码内）
- 
-plaintext
-  
+- 上传音频到腾讯云 COS，将 COS 对象 Key 与问卷写入 MySQL；
+- 不调用 DeepSeek，不生成或返回心理分析结果；
+- 返回记录 ID。
 
-你是科研数据分析助手，仅做Demo模拟演示，不是临床医生。
-下面是受试者PHQ‑9抑郁问卷得分，MBTI问卷作答，请给出模拟性的心理状态参考。
-明确输出标记：【本结果仅Demo模拟，不能作为诊断依据】
-PHQ9:{phq9_data}
-MBTI选择:{mbti_data}
-输出简短JSON格式，包含sim_depression_level, sim_mbti_type, comment。
- 
  
 2.  GET /api/records  获取全部采集记录列表
 3.  GET /api/record/{record_id}  获取单条记录详情（问卷、推理结果）
@@ -211,9 +179,9 @@ MBTI选择:{mbti_data}
  
 后端重要约束
  
-1. DeepSeek API Key从环境变量读取  .env  文件，严禁硬编码；
-2. 当 ENABLE_DEEPSEEK_ANALYSIS=False ，完全不会发起任何对DeepSeek网络请求；
-3. 数据库通过 `DATABASE_URL` 连接 MySQL；生产环境使用独立的 `voice_psychology_demo` 数据库及最小权限账号，禁止将 MySQL `3306` 端口暴露到公网；
+1. 当前版本不发起任何 DeepSeek 网络请求，也不提供 AI 心理分析结果；
+2. 数据库通过 `DATABASE_URL` 连接 MySQL；生产环境使用独立的 `voice_psychology_demo` 数据库及最小权限账号，禁止将 MySQL `3306` 端口暴露到公网；
+3. 音频必须通过受控的 COS 配置上传、读取和删除；
 4. 所有异常捕获，返回友好错误给前端。
  
 七、项目README.md
@@ -255,12 +223,9 @@ npx react‑native run‑android 或 run‑ios模拟器
  
 知情同意 → 匿名受试者信息 → PHQ‑9问卷 → MBTI问卷 → 录音采集 → 上传音频&问卷到FastAPI后端 → 记录管理查看/播放/删除。
  
-调试开关说明
- 
-后端 config.py 里面 ENABLE_DEEPSEEK_ANALYSIS 
- 
-- 默认False【面试演示模式】：不调用DeepSeek，只做存储，无AI分析输出，对齐真实科研App伦理
-- 设置True【本地把玩】：后端调用DeepSeek基于问卷数据做模拟心理分析，返回前端做闭环演示；输出带有明确警告，仅Demo使用。
+心理分析说明
+
+当前版本只完成问卷与录音的科研采集、存储、播放和伦理删除闭环；不调用 DeepSeek，也不向客户端输出心理预测或人格标签。
  
 Demo与真实科研项目差异
  
@@ -276,13 +241,11 @@ plaintext
 ## 八、面试配套口述脚本
 >这个Demo采用React‑Native + FastAPI架构，模仿课题组医疗语音采集项目完整链路。
 >移动端只负责采集知情同意、心理问卷和麦克风录音，把音频和问卷全部上传到本地FastAPI后端。所有AI推理全部放在后端执行，前端不调用任何大模型。
->后端有开关，默认关闭DeepSeek调用，此时只存储数据，完全符合高校科研伦理，客户端不展示心理预测，这就是真实科研系统的形态。
->我本地调试把玩的时候可以打开开关，后端调用DeepSeek做模拟心理分析，用于演示业务完整闭环，同时界面会显著标注只是Demo模拟结果，不能当作诊断。
+>后端当前只存储采集数据，不调用 DeepSeek，客户端不展示心理预测；这与科研采集阶段的伦理边界一致。
 >项目复现了移动端录音权限、音频上传、后端持久化存储，还有伦理要求的受试者一键删除全部数据。真实项目会把通用大模型替换为语音声学特征训练出来的自研模型。
 
 ## 九、强制约束（给AI生成代码）
-1. DeepSeek API Key使用.env环境变量，禁止硬编码进代码；
-2. 开关关闭状态下，完全不会发起向DeepSeek的网络请求；
-3. AI模拟分析仅基于问卷文本，Demo不做语音信号特征提取；代码注释说明真实科研需要声学特征提取；
-4. 删除接口必须同时清理数据库记录 + 磁盘音频文件；
-5. 安卓模拟器访问本机后端注意使用特殊IP `10.0.2.2`，代码中做注释提示。
+1. 当前版本不应发起向 DeepSeek 的网络请求，也不应向客户端返回心理预测；
+2. Demo 不做语音信号特征提取；真实科研需要通过声学特征与经验证模型完成后续研究分析；
+3. 删除接口必须同时清理数据库记录与对应 COS 音频对象；
+4. 安卓模拟器访问本机后端注意使用特殊 IP `10.0.2.2`，代码中做注释提示。

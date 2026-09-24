@@ -1,18 +1,14 @@
 import json
-import shutil
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from .config import ENABLE_DEEPSEEK_ANALYSIS, UPLOAD_AUDIO_DIR
+from .cos_storage import audio_cos_storage
 from .database import get_db
 from .models import CollectionRecord
-
-UPLOAD_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="Voice Psychology Research Demo API",
@@ -30,7 +26,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health_check() -> dict[str, bool]:
-    return {"ok": True, "deepseek_analysis_enabled": ENABLE_DEEPSEEK_ANALYSIS}
+    return {"ok": True}
 
 
 @app.post("/api/submit_record")
@@ -52,10 +48,8 @@ def submit_record(
     if not subject_id:
         raise HTTPException(status_code=422, detail="subject_id is required")
 
-    suffix = Path(audio.filename or "recording.aac").suffix or ".aac"
-    destination = UPLOAD_AUDIO_DIR / f"{uuid4()}{suffix}"
-    with destination.open("wb") as output:
-        shutil.copyfileobj(audio.file, output)
+    suffix = Path(audio.filename or "recording.aac").suffix.lower() or ".aac"
+    audio_key = audio_cos_storage.upload(audio.file, suffix)
 
     # The default mode intentionally only stores research data. Any analysis is a future
     # developer-only integration and must never be treated as medical advice.
@@ -63,13 +57,18 @@ def submit_record(
         subject_id=subject_id,
         age_group=subject_data.get("age_group"),
         gender=subject_data.get("gender"),
-        audio_path=str(destination),
+        audio_path=audio_key,
         phq9_answers=phq9_data,
         mbti_answers=mbti_data,
         analysis_result=None,
     )
     db.add(record)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        audio_cos_storage.delete(audio_key)
+        raise
     db.refresh(record)
     return {"record_id": record.id}
 
@@ -106,11 +105,11 @@ def get_record(record_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/api/audio/{record_id}")
-def get_audio(record_id: int, db: Session = Depends(get_db)) -> FileResponse:
+def get_audio(record_id: int, db: Session = Depends(get_db)) -> StreamingResponse:
     record = db.get(CollectionRecord, record_id)
-    if record is None or not Path(record.audio_path).is_file():
+    if record is None:
         raise HTTPException(status_code=404, detail="Audio not found")
-    return FileResponse(record.audio_path, media_type="audio/aac")
+    return StreamingResponse(audio_cos_storage.stream(record.audio_path), media_type="audio/aac")
 
 
 @app.delete("/api/record/{record_id}")
@@ -118,7 +117,7 @@ def delete_record(record_id: int, db: Session = Depends(get_db)) -> dict[str, bo
     record = db.get(CollectionRecord, record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
-    Path(record.audio_path).unlink(missing_ok=True)
+    audio_cos_storage.delete(record.audio_path)
     db.delete(record)
     db.commit()
     return {"deleted": True}
@@ -128,7 +127,7 @@ def delete_record(record_id: int, db: Session = Depends(get_db)) -> dict[str, bo
 def delete_subject_records(subject_id: str, db: Session = Depends(get_db)) -> dict[str, int]:
     records = db.query(CollectionRecord).filter(CollectionRecord.subject_id == subject_id).all()
     for record in records:
-        Path(record.audio_path).unlink(missing_ok=True)
+        audio_cos_storage.delete(record.audio_path)
         db.delete(record)
     db.commit()
     return {"deleted_count": len(records)}
