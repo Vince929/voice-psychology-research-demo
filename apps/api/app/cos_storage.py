@@ -34,10 +34,10 @@ class AudioCosStorage:
 
     def upload(self, source: BinaryIO, suffix: str) -> str:
         key = f"{AUDIO_COS_KEY_PREFIX}/audio/{uuid4()}{suffix}"
-        self.client.upload_file_from_stream(
+        self.client.upload_file_from_buffer(
             Bucket=AUDIO_COS_BUCKET,
             Key=key,
-            FileStream=source,
+            Body=source,
             PartSize=10,
             MAXThread=4,
             EnableMD5=False,
