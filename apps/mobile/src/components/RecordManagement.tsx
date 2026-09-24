@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import {
   CollectionRecord,
@@ -10,6 +10,7 @@ import {
   listRecords,
   RecordSummary,
 } from '../services/api';
+import {playRemoteAudio, recordingErrorMessage, stopRemoteAudio} from '../services/recorder';
 
 type RecordManagementProps = {
   onStartNew: () => void;
@@ -48,12 +49,19 @@ export function RecordManagement({onStartNew}: RecordManagementProps) {
   }
 
   async function openAudio(recordId: number) {
-    const url = getAudioUrl(recordId);
-    if (!await Linking.canOpenURL(url)) {
-      Alert.alert('无法播放', '当前设备没有可用的音频打开方式。');
-      return;
+    try {
+      await playRemoteAudio(getAudioUrl(recordId));
+    } catch (error) {
+      Alert.alert('无法播放', `音频播放失败：${recordingErrorMessage(error)}`);
     }
-    await Linking.openURL(url);
+  }
+
+  async function stopAudio() {
+    try {
+      await stopRemoteAudio();
+    } catch (error) {
+      Alert.alert('停止播放失败', recordingErrorMessage(error));
+    }
   }
 
   function confirmDeleteRecord(record: RecordSummary) {
@@ -114,13 +122,13 @@ export function RecordManagement({onStartNew}: RecordManagementProps) {
       ))}
       <PrimaryButton label="开始新的采集" onPress={onStartNew} />
       <Modal visible={selectedRecord !== null} animationType="slide" transparent onRequestClose={() => setSelectedRecord(null)}>
-        {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
+        {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onStop={() => void stopAudio()} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
       </Modal>
     </View>
   );
 }
 
-function RecordDetail({record, onClose, onPlay, onDeleteRecord, onDeleteSubject}: {record: CollectionRecord; onClose: () => void; onPlay: () => void; onDeleteRecord: () => void; onDeleteSubject: () => void}) {
+function RecordDetail({record, onClose, onPlay, onStop, onDeleteRecord, onDeleteSubject}: {record: CollectionRecord; onClose: () => void; onPlay: () => void; onStop: () => void; onDeleteRecord: () => void; onDeleteSubject: () => void}) {
   return (
     <View style={styles.modalBackdrop}>
       <View style={styles.detailSheet}>
@@ -138,6 +146,7 @@ function RecordDetail({record, onClose, onPlay, onDeleteRecord, onDeleteSubject}
         <Text style={styles.detailText}>{JSON.stringify(record.mbti_answers)}</Text>
         {record.analysis_result ? <><Text style={styles.detailHeading}>调试模拟分析</Text><Text style={styles.detailText}>{JSON.stringify(record.analysis_result)}</Text></> : null}
         <PrimaryButton label="播放音频" onPress={onPlay} />
+        <ActionButton label="停止播放" onPress={onStop} />
         <ActionButton label="删除本条记录" destructive onPress={onDeleteRecord} />
         <ActionButton label="删除该受试者全部数据" destructive onPress={onDeleteSubject} />
         <Pressable onPress={onClose}><Text style={styles.link}>返回记录列表</Text></Pressable>

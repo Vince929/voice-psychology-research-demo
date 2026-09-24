@@ -1,7 +1,20 @@
-import {PermissionsAndroid, Platform} from 'react-native';
-import AudioRecorderPlayer from 'react-native-audio-recorder-player';
+import {NativeModules, PermissionsAndroid, Platform} from 'react-native';
 
-const recorder = new AudioRecorderPlayer();
+type VoiceRecorderModule = {
+  start(): Promise<string>;
+  stop(): Promise<string>;
+  play(url: string): Promise<void>;
+  stopPlayback(): Promise<void>;
+};
+
+const {VoiceRecorder} = NativeModules as {VoiceRecorder?: VoiceRecorderModule};
+
+function getRecorder(): VoiceRecorderModule {
+  if (!VoiceRecorder) {
+    throw new Error('原生录音模块未加载。请重新构建并安装 Android 应用后重试。');
+  }
+  return VoiceRecorder;
+}
 
 export async function requestMicrophonePermission() {
   if (Platform.OS !== 'android') {
@@ -20,9 +33,27 @@ export async function requestMicrophonePermission() {
 }
 
 export function startRecording() {
-  return recorder.startRecorder();
+  return getRecorder().start();
 }
 
 export function stopRecording() {
-  return recorder.stopRecorder();
+  return getRecorder().stop();
+}
+
+export function playRemoteAudio(url: string) {
+  return getRecorder().play(url);
+}
+
+export function stopRemoteAudio() {
+  return getRecorder().stopPlayback();
+}
+
+export function recordingErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return '未知原生录音错误';
 }
