@@ -124,8 +124,9 @@ def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dic
         "role": "system",
         "content": (
             "You produce experimental, non-clinical emotion-state predictions from a transcript and ASR timing metrics. "
-            "Return only JSON with expression_state, vitality_score, tension_score, emotion_dimensions, evidence, summary, suggestion, disclaimer. "
+            "Return only JSON with expression_state, vitality_score, tension_score, emotion_dimensions, emotion_keywords, evidence, summary, suggestion, disclaimer. "
             "emotion_dimensions must be an object with Chinese string values for valence, arousal, and stability; "
+            "emotion_keywords must be 2 or 3 distinct Chinese labels selected only from: 积极, 平静, 兴奋, 紧张, 低活力, 低落, 波动, 稳定, 专注. "
             "describe only expression in this recording, using qualified language such as '偏积极', '平稳', or '可能有波动'. "
             "suggestion is a short neutral state explanation, never advice or an intervention. "
             "Scores must be integers from 0 to 100. Do not diagnose illness, estimate depression or anxiety risk, "
@@ -161,7 +162,7 @@ def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dic
 
 
 def _validate_analysis_result(result: dict[str, Any]) -> None:
-    required_keys = {"expression_state", "vitality_score", "tension_score", "emotion_dimensions", "evidence", "summary", "suggestion", "disclaimer"}
+    required_keys = {"expression_state", "vitality_score", "tension_score", "emotion_dimensions", "emotion_keywords", "evidence", "summary", "suggestion", "disclaimer"}
     if not required_keys.issubset(result):
         raise ExternalServiceError("analysis", "AI 分析结果不完整，请稍后重新分析。", False)
     if not all(isinstance(result[key], int) and 0 <= result[key] <= 100 for key in ("vitality_score", "tension_score")):
@@ -169,6 +170,10 @@ def _validate_analysis_result(result: dict[str, Any]) -> None:
     dimensions = result["emotion_dimensions"]
     if not isinstance(dimensions, dict) or not all(isinstance(dimensions.get(key), str) and dimensions[key].strip() for key in ("valence", "arousal", "stability")):
         raise ExternalServiceError("analysis", "AI 分析结果的情感维度不完整，请稍后重新分析。", False)
+    allowed_keywords = {"积极", "平静", "兴奋", "紧张", "低活力", "低落", "波动", "稳定", "专注"}
+    keywords = result["emotion_keywords"]
+    if not isinstance(keywords, list) or len(keywords) not in (2, 3) or len(set(keywords)) != len(keywords) or any(keyword not in allowed_keywords for keyword in keywords):
+        raise ExternalServiceError("analysis", "AI 分析结果的情感关键词不符合预期，请稍后重新分析。", False)
     prohibited = ("抑郁", "焦虑", "疾病", "MBTI")
     result_text = json.dumps({key: value for key, value in result.items() if key != "disclaimer"}, ensure_ascii=False)
     if any(word in result_text for word in prohibited):

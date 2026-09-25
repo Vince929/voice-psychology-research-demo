@@ -28,7 +28,7 @@ export type AnalysisTask = {
 export type RecordSummary = {
   id: number;
   subject_id: string;
-  audio_filename: string;
+  emotion_keywords: string[];
   created_at: string;
   task: AnalysisTask | null;
 };
@@ -55,6 +55,7 @@ export type AnalysisResult = {
     arousal: string;
     stability: string;
   };
+  emotion_keywords?: string[];
   evidence: string[];
   summary: string;
   suggestion: string;

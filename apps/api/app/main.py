@@ -49,10 +49,12 @@ def task_summary(task: AnalysisTask | None) -> dict | None:
 
 
 def record_summary(record: CollectionRecord) -> dict:
+    analysis_result = record.analysis_result or {}
+    emotion_keywords = analysis_result.get("emotion_keywords") if isinstance(analysis_result, dict) else None
     return {
         "id": record.id,
         "subject_id": record.subject_id,
-        "audio_filename": record.audio_filename,
+        "emotion_keywords": emotion_keywords if isinstance(emotion_keywords, list) else [],
         "created_at": record.created_at,
         "task": task_summary(record.analysis_task),
     }
