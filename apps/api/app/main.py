@@ -48,13 +48,34 @@ def task_summary(task: AnalysisTask | None) -> dict | None:
     }
 
 
+def list_emotion_keywords(analysis_result: dict | None) -> list[str]:
+    if not isinstance(analysis_result, dict):
+        return []
+
+    stored_keywords = analysis_result.get("emotion_keywords")
+    if isinstance(stored_keywords, list) and all(isinstance(keyword, str) for keyword in stored_keywords):
+        return stored_keywords[:3]
+
+    # Records created before emotion_keywords was added still have the two scores below.
+    # Derive a compact display-only fallback so the list does not require historical re-analysis.
+    keywords: list[str] = []
+    vitality = analysis_result.get("vitality_score")
+    tension = analysis_result.get("tension_score")
+    dimensions = analysis_result.get("emotion_dimensions")
+    if isinstance(vitality, int):
+        keywords.append("兴奋" if vitality >= 65 else "低活力" if vitality <= 35 else "专注")
+    if isinstance(tension, int):
+        keywords.append("紧张" if tension >= 65 else "平静" if tension <= 35 else "稳定")
+    if isinstance(dimensions, dict) and "波动" in str(dimensions.get("stability", "")):
+        keywords.append("波动")
+    return list(dict.fromkeys(keywords))[:3]
+
+
 def record_summary(record: CollectionRecord) -> dict:
-    analysis_result = record.analysis_result or {}
-    emotion_keywords = analysis_result.get("emotion_keywords") if isinstance(analysis_result, dict) else None
     return {
         "id": record.id,
         "subject_id": record.subject_id,
-        "emotion_keywords": emotion_keywords if isinstance(emotion_keywords, list) else [],
+        "emotion_keywords": list_emotion_keywords(record.analysis_result),
         "created_at": record.created_at,
         "task": task_summary(record.analysis_task),
     }
