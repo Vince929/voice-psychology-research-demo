@@ -114,7 +114,6 @@ export default function App() {
         const completedAudioUri = await stopRecording();
         setAudioUri(completedAudioUri);
         setRecording(false);
-        showNotice('录音已结束，正在提交并开始分析。', 'info');
         await upload(completedAudioUri);
         return;
       }
@@ -173,7 +172,7 @@ export default function App() {
           <StepRail activeIndex={collectingStep - 1} />
         </> : null}
       </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, step === 'record' && styles.recordContent]}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, step === 'record' && styles.recordContent, step === 'records' && styles.recordsContent]}>
         {step === 'consent' && (
           <View style={styles.section}>
             <View style={styles.introMark}><Text style={styles.introMarkText}>01</Text><Text style={styles.introMarkCaption}>开始之前</Text></View>
@@ -222,9 +221,10 @@ export default function App() {
             </View>
           </View>
         )}
-        {step === 'records' ? <RecordManagement onContinueCollection={continueCurrentParticipantCollection} onNewParticipant={startNewParticipant} onNotice={showNotice} /> : null}
+        {step === 'records' ? <RecordManagement onNotice={showNotice} /> : null}
       </ScrollView>
       {step === 'record' ? <RecordingDock recording={recording} submitting={submitting} audioUri={audioUri} onRecordPress={toggleRecording} onRecordsPress={() => { setRecordsReturnStep('record'); setStep('records'); }} /> : null}
+      {step === 'records' ? <RecordsActionDock onContinueCollection={continueCurrentParticipantCollection} onNewParticipant={startNewParticipant} /> : null}
       <Toast message={notice?.message ?? null} tone={notice?.tone} onDismiss={() => setNotice(null)} />
     </SafeAreaView>
   );
@@ -238,12 +238,19 @@ function RecordingDock({recording, submitting, audioUri, onRecordPress, onRecord
   return (
     <View style={styles.recordingDock}>
       <RecordingOrb recording={recording} submitting={submitting} onPress={onRecordPress} />
-      {recording ? <Text style={styles.recordingSafetyNote}>轻触暂停图标即可结束录音，系统将自动安全上传。</Text> : null}
-      {submitting ? <Text style={styles.statusMessage}>正在加密提交并启动分析…</Text> : null}
       {!recording && audioUri && !submitting ? <Text style={styles.errorMessage}>自动提交未完成，请检查提示后重新录音。</Text> : null}
       <Pressable accessibilityRole="button" accessibilityLabel="查看录音文件列表" hitSlop={8} style={({pressed}) => [styles.dockRecordsButton, pressed && styles.pressed]} onPress={onRecordsPress}><Text style={styles.dockRecordsButtonText}>查看录音文件列表</Text><Text style={styles.dockRecordsButtonArrow}>→</Text></Pressable>
     </View>
   );
+}
+
+function RecordsActionDock({onContinueCollection, onNewParticipant}: {onContinueCollection: () => void; onNewParticipant: () => void}) {
+  return <View style={styles.recordsActionDock}>
+    <PrimaryButton label="继续采集" onPress={onContinueCollection} />
+    <Pressable accessibilityRole="button" accessibilityLabel="新建参与者" style={({pressed}) => [styles.newParticipantButton, pressed && styles.pressed]} onPress={onNewParticipant}>
+      <Text style={styles.newParticipantButtonText}>新建参与者（生成新匿名编号）</Text>
+    </Pressable>
+  </View>;
 }
 
 function RecordingOrb({recording, submitting, onPress}: {recording: boolean; submitting: boolean; onPress: () => void}) {
@@ -294,8 +301,7 @@ function RecordingOrb({recording, submitting, onPress}: {recording: boolean; sub
         </View>
       </Pressable>
       <SignalBars active={recording} progress={wave} />
-      <Text style={styles.orbTitle}>{submitting ? '正在安全提交' : recording ? '录音进行中' : '轻触麦克风开始录音'}</Text>
-      <Text style={styles.orbHint}>{submitting ? '请保持当前页面，不要关闭应用' : recording ? '轻触暂停图标结束后会自动上传' : '完成朗读后，再次轻触暂停图标即可提交'}</Text>
+      {!submitting ? <Text style={styles.orbTitle}>{recording ? '录音进行中' : '轻触麦克风开始录音'}</Text> : null}
     </View>
   );
 }
@@ -348,6 +354,7 @@ const styles = StyleSheet.create({
   stepLineActive: {backgroundColor: '#F2B56B'},
   content: {paddingHorizontal: 20, paddingTop: 20, paddingBottom: 44},
   recordContent: {paddingBottom: 236},
+  recordsContent: {paddingBottom: 140},
   section: {gap: 18},
   introMark: {flexDirection: 'row', alignItems: 'center', gap: 9},
   introMarkText: {fontSize: 13, letterSpacing: 1.4, fontWeight: '900', color: '#D76B50'},
@@ -376,6 +383,9 @@ const styles = StyleSheet.create({
   promptLabel: {fontSize: 12, letterSpacing: 1.2, fontWeight: '900', color: '#A56826'},
   prompt: {fontSize: 19, lineHeight: 32, color: '#49351E', fontWeight: '600'},
   recordingDock: {position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
+  recordsActionDock: {position: 'absolute', left: 0, right: 0, bottom: 0, gap: 9, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
+  newParticipantButton: {minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#BFD4C8', backgroundColor: '#F8FBF8'},
+  newParticipantButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
   dockRecordsButton: {alignSelf: 'stretch', minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, zIndex: 2, elevation: 0, backgroundColor: 'transparent'},
   dockRecordsButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
   dockRecordsButtonArrow: {fontSize: 15, fontWeight: '800', color: '#1D6258'},

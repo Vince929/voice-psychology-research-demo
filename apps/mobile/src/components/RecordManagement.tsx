@@ -18,8 +18,6 @@ import {playRemoteAudio, recordingErrorMessage, stopRemoteAudio} from '../servic
 type NoticeTone = 'success' | 'error' | 'info';
 
 type RecordManagementProps = {
-  onContinueCollection: () => void;
-  onNewParticipant: () => void;
   onNotice: (message: string, tone?: NoticeTone) => void;
 };
 
@@ -76,7 +74,7 @@ function taskLabel(task: RecordSummary['task'] | CollectionRecord['task']) {
   return task ? STATUS_LABELS[task.status] : STATUS_LABELS.failed;
 }
 
-export function RecordManagement({onContinueCollection, onNewParticipant, onNotice}: RecordManagementProps) {
+export function RecordManagement({onNotice}: RecordManagementProps) {
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CollectionRecord | null>(null);
   const [loading, setLoading] = useState(false);
@@ -216,10 +214,6 @@ export function RecordManagement({onContinueCollection, onNewParticipant, onNoti
         </View>
       ) : null}
       {records.map(record => <RecordCard key={record.id} record={record} onDetail={() => void showRecord(record.id)} onRetry={() => void handleRetry(record.id)} onDelete={() => confirmDeleteRecord(record)} />)}
-      <PrimaryButton label="继续为当前参与者采集" onPress={onContinueCollection} />
-      <Pressable style={({pressed}) => [styles.newParticipantButton, pressed && styles.pressed]} onPress={onNewParticipant}>
-        <Text style={styles.newParticipantButtonText}>新建参与者（生成新匿名编号）</Text>
-      </Pressable>
       <Modal visible={selectedRecord !== null} animationType="slide" transparent onRequestClose={() => setSelectedRecord(null)}>
         {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onStop={() => void stopAudio()} onRetry={() => void handleRetry(selectedRecord.id)} onCancel={() => void handleCancel(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
       </Modal>
@@ -323,16 +317,14 @@ const styles = StyleSheet.create({
   heading: {fontSize: 29, letterSpacing: -0.9, fontWeight: '800', color: '#173A35'},
   body: {fontSize: 15, lineHeight: 22, color: '#61736B'},
   refreshButton: {minHeight: 42, minWidth: 80, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#E6F0E9'},
-  refreshButtonContent: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  refreshIcon: {fontSize: 18, lineHeight: 18, color: '#1D6258', fontWeight: '700', includeFontPadding: false},
-  refreshButtonText: {fontSize: 13, lineHeight: 18, fontWeight: '800', color: '#1D6258', includeFontPadding: false},
+  refreshButtonContent: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5},
+  refreshIcon: {fontSize: 20, lineHeight: 20, color: '#1D6258', fontWeight: '700', includeFontPadding: false, textAlignVertical: 'center', transform: [{translateY: -1}]},
+  refreshButtonText: {fontSize: 13, lineHeight: 20, fontWeight: '800', color: '#1D6258', includeFontPadding: false, textAlignVertical: 'center'},
   button: {minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 18, backgroundColor: '#D86B51', borderRadius: 16, shadowColor: '#A64734', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: {width: 0, height: 6}, elevation: 4},
   buttonDisabled: {backgroundColor: '#B9C1BA', shadowOpacity: 0},
   buttonPressed: {transform: [{scale: 0.985}]},
   buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
   buttonArrow: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
-  newParticipantButton: {minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#BFD4C8', backgroundColor: '#F8FBF8'},
-  newParticipantButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
   emptyPanel: {padding: 25, borderRadius: 20, borderWidth: 1, borderColor: '#D9DED5', borderStyle: 'dashed', backgroundColor: '#FFFCF6', gap: 8},
   emptyTitle: {fontSize: 18, fontWeight: '800', color: '#173A35'},
   empty: {fontSize: 15, lineHeight: 22, color: '#61736B'},
