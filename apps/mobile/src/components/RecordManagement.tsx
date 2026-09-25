@@ -183,7 +183,7 @@ export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) 
           <Text style={styles.empty}>完成一次录音并提交后，转录与分析进度会显示在这里。</Text>
         </View>
       ) : null}
-      {records.map(record => <RecordCard key={record.id} record={record} onDetail={() => void showRecord(record.id)} onDelete={() => confirmDeleteRecord(record)} />)}
+      {records.map(record => <RecordCard key={record.id} record={record} onDetail={() => void showRecord(record.id)} onRetry={() => void handleRetry(record.id)} onDelete={() => confirmDeleteRecord(record)} />)}
       <PrimaryButton label="开始新的采集" onPress={onStartNew} />
       <Modal visible={selectedRecord !== null} animationType="slide" transparent onRequestClose={() => setSelectedRecord(null)}>
         {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onStop={() => void stopAudio()} onRetry={() => void handleRetry(selectedRecord.id)} onCancel={() => void handleCancel(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
@@ -192,8 +192,9 @@ export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) 
   );
 }
 
-function RecordCard({record, onDetail, onDelete}: {record: RecordSummary; onDetail: () => void; onDelete: () => void}) {
+function RecordCard({record, onDetail, onRetry, onDelete}: {record: RecordSummary; onDetail: () => void; onRetry: () => void; onDelete: () => void}) {
   const status = record.task?.status ?? 'failed';
+  const canRetry = !record.task || !ACTIVE_STATUSES.includes(status);
   const failureLabel = record.task?.failed_stage === 'transcription' ? '转录失败' : STATUS_LABELS[status];
   return (
     <View style={styles.recordCard}>
@@ -205,6 +206,7 @@ function RecordCard({record, onDetail, onDelete}: {record: RecordSummary; onDeta
       {record.task?.status === 'failed' ? <Text style={styles.errorText}>{record.task.error_message || '任务处理失败，可查看详情后重新分析。'}</Text> : null}
       <View style={styles.actionRow}>
         <ActionButton label="详情" onPress={onDetail} />
+        {canRetry ? <ActionButton label="重新分析" onPress={onRetry} /> : null}
         <ActionButton label="删除" destructive onPress={onDelete} />
       </View>
     </View>
@@ -234,7 +236,7 @@ function RecordDetail({record, onClose, onPlay, onStop, onRetry, onCancel, onDel
           <PrimaryButton label="播放原始录音" onPress={onPlay} />
           <ActionButton label="停止播放" onPress={onStop} />
           {isActive ? <ActionButton label="取消当前分析" destructive onPress={onCancel} /> : null}
-          {task?.status === 'failed' ? <ActionButton label="重新分析" onPress={onRetry} /> : null}
+          {!isActive ? <ActionButton label="重新分析" onPress={onRetry} /> : null}
           {task?.error_message ? <SectionBlock title="任务状态" value={`${task.failed_stage === 'transcription' ? '转录' : '分析'}失败：${task.error_message}`} /> : null}
           {record.transcript ? <SectionBlock title="真实转写" value={record.transcript} /> : null}
           {record.asr_result ? <SectionBlock title="ASR 依据" value={`录音时长：${formatDuration(record.asr_result.audio_duration)}\n句段数：${sentences.length}`} /> : null}
