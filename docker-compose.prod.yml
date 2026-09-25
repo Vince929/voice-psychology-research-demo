@@ -15,6 +15,21 @@ services:
     networks:
       - voice-psychology-net
 
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: voice-psychology-worker
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - apps/api/.env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - voice-psychology-net
+
   mysql:
     image: mysql:8.0
     container_name: voice-psychology-mysql

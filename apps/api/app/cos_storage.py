@@ -18,7 +18,7 @@ from .config import (
 
 
 class AudioCosStorage:
-    """Stores research audio in the configured Tencent COS bucket."""
+    """Stores original recordings in the configured Tencent COS bucket."""
 
     @cached_property
     def client(self) -> CosS3Client:
@@ -32,7 +32,7 @@ class AudioCosStorage:
             )
         )
 
-    def upload(self, source: BinaryIO, suffix: str) -> str:
+    def upload(self, source: BinaryIO, suffix: str, content_type: str) -> str:
         key = f"{AUDIO_COS_KEY_PREFIX}/audio/{uuid4()}{suffix}"
         self.client.upload_file_from_buffer(
             Bucket=AUDIO_COS_BUCKET,
@@ -41,7 +41,7 @@ class AudioCosStorage:
             PartSize=10,
             MAXThread=4,
             EnableMD5=False,
-            ContentType="audio/aac",
+            ContentType=content_type,
         )
         return key
 
@@ -53,6 +53,9 @@ class AudioCosStorage:
                 yield chunk
         finally:
             body.close()
+
+    def read(self, key: str) -> bytes:
+        return b"".join(self.stream(key))
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=AUDIO_COS_BUCKET, Key=key)
