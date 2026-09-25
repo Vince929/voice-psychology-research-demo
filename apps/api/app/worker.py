@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import joinedload
 
-from .analysis_services import ExternalServiceError, analyze_expression, transcribe_m4a
+from .analysis_services import ExternalServiceError, analyze_expression, extract_audio_features, transcribe_m4a
 from .config import TASK_MAX_ATTEMPTS, WORKER_LEASE_SECONDS, WORKER_POLL_INTERVAL_SECONDS
 from .cos_storage import audio_cos_storage
 from .database import SessionLocal
@@ -106,7 +106,9 @@ def process_task(task_id: int) -> None:
         if is_cancelled(task_id):
             mark_cancelled(task_id)
             return
-        transcript, asr_result, asr_request_id = transcribe_m4a(audio_cos_storage.read(audio_path))
+        audio_bytes = audio_cos_storage.read(audio_path)
+        transcript, asr_result, asr_request_id = transcribe_m4a(audio_bytes)
+        audio_features = extract_audio_features(audio_bytes)
         if is_cancelled(task_id):
             mark_cancelled(task_id)
             return
@@ -129,7 +131,7 @@ def process_task(task_id: int) -> None:
             task.lease_expires_at = datetime.utcnow() + timedelta(seconds=WORKER_LEASE_SECONDS)
             db.commit()
 
-        analysis_result, deepseek_request_id = analyze_expression(transcript, asr_result)
+        analysis_result, deepseek_request_id = analyze_expression(transcript, asr_result, audio_features)
         if is_cancelled(task_id):
             mark_cancelled(task_id)
             return

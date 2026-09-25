@@ -2,7 +2,14 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
+import math
+import subprocess
+import tempfile
 import time
+import wave
+from array import array
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -16,6 +23,9 @@ from .config import (
     DEEPSEEK_MODEL,
     TENCENTCLOUD_APP_ID,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalServiceError(RuntimeError):
@@ -82,6 +92,71 @@ def transcribe_m4a(audio_bytes: bytes) -> tuple[str | None, dict[str, Any], str 
     return transcript or None, payload, payload.get("request_id")
 
 
+def extract_audio_features(audio_bytes: bytes) -> dict[str, Any] | None:
+    """Extract short-window loudness metrics from the original recording without retaining audio locally."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="voice-features-") as directory:
+            input_path = Path(directory) / "recording.m4a"
+            output_path = Path(directory) / "recording.wav"
+            input_path.write_bytes(audio_bytes)
+            subprocess.run(
+                [
+                    "ffmpeg", "-v", "error", "-y", "-i", str(input_path), "-ac", "1", "-ar", "16000", "-f", "wav", str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=45,
+            )
+            with wave.open(str(output_path), "rb") as wav_file:
+                sample_rate = wav_file.getframerate()
+                sample_width = wav_file.getsampwidth()
+                channels = wav_file.getnchannels()
+                raw_frames = wav_file.readframes(wav_file.getnframes())
+    except (FileNotFoundError, subprocess.SubprocessError, wave.Error, OSError) as error:
+        logger.warning("audio feature extraction skipped: %s", error)
+        return None
+
+    if sample_rate <= 0 or sample_width != 2 or channels != 1:
+        logger.warning("audio feature extraction skipped: unsupported wav format")
+        return None
+
+    samples = array("h")
+    samples.frombytes(raw_frames)
+    if not samples:
+        return None
+    if samples.itemsize != 2:
+        logger.warning("audio feature extraction skipped: unexpected sample size")
+        return None
+
+    window_samples = max(1, sample_rate // 4)
+    trend: list[dict[str, float | int]] = []
+    dbfs_values: list[float] = []
+    for start in range(0, len(samples), window_samples):
+        chunk = samples[start : start + window_samples]
+        if not chunk:
+            continue
+        rms = math.sqrt(sum(sample * sample for sample in chunk) / len(chunk))
+        dbfs = max(-80.0, 20 * math.log10(max(rms, 1.0) / 32768.0))
+        dbfs_values.append(dbfs)
+        trend.append({"time_ms": round(start * 1000 / sample_rate), "loudness_dbfs": round(dbfs, 1)})
+
+    if not dbfs_values:
+        return None
+    low_dbfs = min(dbfs_values)
+    high_dbfs = max(dbfs_values)
+    return {
+        "metric": "short_term_loudness_dbfs",
+        "window_ms": 250,
+        "duration_ms": round(len(samples) * 1000 / sample_rate),
+        "summary": {
+            "average_dbfs": round(sum(dbfs_values) / len(dbfs_values), 1),
+            "peak_dbfs": round(high_dbfs, 1),
+            "dynamic_range_db": round(high_dbfs - low_dbfs, 1),
+        },
+        "volume_trend": trend,
+    }
+
+
 def _numeric_metric_summary(sentences: list[dict[str, Any]], field: str) -> dict[str, float | int] | None:
     values = [sentence[field] for sentence in sentences if isinstance(sentence.get(field), (int, float))]
     if not values:
@@ -94,7 +169,9 @@ def _numeric_metric_summary(sentences: list[dict[str, Any]], field: str) -> dict
     }
 
 
-def build_analysis_input(transcript: str, asr_result: dict[str, Any]) -> dict[str, Any]:
+def build_analysis_input(
+    transcript: str, asr_result: dict[str, Any], audio_features: dict[str, Any] | None = None
+) -> dict[str, Any]:
     sentences = [
         {
             "text": sentence.get("text", ""),
@@ -113,28 +190,31 @@ def build_analysis_input(transcript: str, asr_result: dict[str, Any]) -> dict[st
         "speech_speed_summary": _numeric_metric_summary(sentences, "speech_speed"),
         "emotional_energy_summary": _numeric_metric_summary(sentences, "emotional_energy"),
         "sentences": sentences,
+        "audio_features": audio_features,
     }
 
 
-def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+def analyze_expression(
+    transcript: str, asr_result: dict[str, Any], audio_features: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], str | None]:
     if not DEEPSEEK_API_KEY:
         raise ExternalServiceError("analysis", "AI 分析服务尚未完成配置，请联系管理员检查服务配置。", False)
 
     prompt = {
         "role": "system",
         "content": (
-            "You produce experimental, non-clinical emotion-state predictions from a transcript and ASR timing metrics. "
+            "You produce experimental, non-clinical emotion-state predictions from a transcript, ASR timing metrics, and optional short-term loudness metrics. "
             "Return only JSON with expression_state, vitality_score, tension_score, emotion_dimensions, emotion_keywords, evidence, summary, suggestion, disclaimer. "
             "emotion_dimensions must be an object with Chinese string values for valence, arousal, and stability; "
             "emotion_keywords must be 2 or 3 distinct Chinese labels selected only from: 积极, 平静, 兴奋, 紧张, 低活力, 低落, 波动, 稳定, 专注. "
             "describe only expression in this recording, using qualified language such as '偏积极', '平稳', or '可能有波动'. "
             "suggestion is a short neutral state explanation, never advice or an intervention. "
             "Scores must be integers from 0 to 100. Do not diagnose illness, estimate depression or anxiety risk, "
-            "assign personality types, or claim clinical accuracy. All evidence must refer only to the supplied transcript or ASR data. "
+            "assign personality types, or claim clinical accuracy. All evidence must refer only to the supplied transcript, ASR data, or audio features. "
             "The disclaimer must state in Chinese that this is experimental and not a medical, psychological, or personality assessment."
         ),
     }
-    user_content = json.dumps(build_analysis_input(transcript, asr_result), ensure_ascii=False)
+    user_content = json.dumps(build_analysis_input(transcript, asr_result, audio_features), ensure_ascii=False)
     try:
         response = requests.post(
             f"{DEEPSEEK_BASE_URL}/chat/completions",
@@ -158,6 +238,8 @@ def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dic
         raise ExternalServiceError("analysis", "AI 分析服务返回的数据格式异常，请稍后重新分析。", False) from error
 
     _validate_analysis_result(result)
+    if audio_features is not None:
+        result["audio_features"] = audio_features
     return result, payload.get("id")
 
 

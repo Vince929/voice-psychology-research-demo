@@ -46,6 +46,21 @@ export type AsrResult = {
   flash_result?: Array<{text: string; sentence_list?: AsrSentence[]}>;
 };
 
+export type AudioFeatures = {
+  metric: 'short_term_loudness_dbfs';
+  window_ms: number;
+  duration_ms: number;
+  summary: {
+    average_dbfs: number;
+    peak_dbfs: number;
+    dynamic_range_db: number;
+  };
+  volume_trend: Array<{
+    time_ms: number;
+    loudness_dbfs: number;
+  }>;
+};
+
 export type AnalysisResult = {
   expression_state: string;
   vitality_score: number;
@@ -56,6 +71,7 @@ export type AnalysisResult = {
     stability: string;
   };
   emotion_keywords?: string[];
+  audio_features?: AudioFeatures;
   evidence: string[];
   summary: string;
   suggestion: string;
