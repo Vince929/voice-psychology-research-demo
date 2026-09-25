@@ -90,6 +90,8 @@ jobs:
               yoyo apply --batch --database "$yoyo_database_url" db/migrations
               echo "Yoyo migration status:"
               yoyo list --database "$yoyo_database_url" db/migrations
+              echo "Connected database and tables:"
+              python -c "import os; import pymysql; from urllib.parse import urlparse; u = urlparse(os.environ['DATABASE_URL']); c = pymysql.connect(host=u.hostname, port=u.port or 3306, user=u.username, password=u.password, database=u.path.lstrip('/')); q = c.cursor(); q.execute('SELECT DATABASE(), @@hostname, @@port'); print(q.fetchone()); q.execute('SHOW TABLES'); print([r[0] for r in q.fetchall()]); c.close()"
             '
             echo "Yoyo database migrations completed"
             docker compose -f docker-compose.prod.yml up -d --remove-orphans api worker
