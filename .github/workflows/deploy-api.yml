@@ -65,12 +65,12 @@ jobs:
             upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
             upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
 
-            # Keep the database URL managed in the server-side .env, but make it valid from
-            # inside the API/worker containers. The shared MySQL master is reachable by its
-            # Docker service name, not by the container-local 127.0.0.1 address.
-            DATABASE_URL_VALUE="$(grep -m1 '^DATABASE_URL=' "$ENV_FILE" | cut -d '=' -f2-)"
+            # GitHub Secrets take precedence over Variables so every deployment replaces any
+            # stale server-side value. The shared MySQL master is reachable from containers by
+            # its Docker service name, not by the container-local 127.0.0.1 address.
+            DATABASE_URL_VALUE="${{ secrets.DATABASE_URL || vars.DATABASE_URL }}"
             if [[ -z "$DATABASE_URL_VALUE" ]]; then
-              echo "DATABASE_URL must be configured in $ENV_FILE" >&2
+              echo "GitHub DATABASE_URL Secret or Variable must be configured" >&2
               exit 1
             fi
             DATABASE_URL_VALUE="${DATABASE_URL_VALUE/#mysql:\/\//mysql+pymysql://}"
