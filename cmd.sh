@@ -3,6 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIR="$PROJECT_ROOT/apps/api"
+MOBILE_DIR="$PROJECT_ROOT/apps/mobile"
 ENV_FILE="$API_DIR/.env"
 
 load_database_url() {
@@ -31,6 +32,7 @@ Usage: ./cmd.sh [command]
   mobile, android      Build, install and start the Android app in emulator mode
   usb                  Configure USB port reverse and start the Android app on a device
   metro                Start the React Native Metro server only
+  package, apk         Build the Android release APK
   db:migrate           Apply pending versioned SQL migrations with Yoyo
   help, -h, --help     Show this help
 EOF
@@ -63,6 +65,20 @@ start_worker() {
   exec .venv/bin/python -m app.worker
 }
 
+build_android_apk() {
+  local gradle_wrapper="$MOBILE_DIR/android/gradlew"
+  if [[ ! -x "$gradle_wrapper" ]]; then
+    echo "Android Gradle wrapper is missing or not executable: $gradle_wrapper" >&2
+    exit 1
+  fi
+
+  (
+    cd "$MOBILE_DIR/android"
+    ./gradlew assembleRelease
+  )
+  echo "Release APK: $MOBILE_DIR/android/app/build/outputs/apk/release/app-release.apk"
+}
+
 start_api() {
   if [[ ! -x "$API_DIR/.venv/bin/python" ]]; then
     echo "Backend virtual environment is missing: $API_DIR/.venv"
@@ -93,6 +109,9 @@ case "${1:-api}" in
   metro)
     cd "$PROJECT_ROOT"
     exec pnpm run mobile:start
+    ;;
+  package|apk)
+    build_android_apk
     ;;
   db:migrate)
     migrate_database
