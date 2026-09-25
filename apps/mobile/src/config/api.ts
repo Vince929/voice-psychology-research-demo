@@ -16,7 +16,7 @@ export const LOCAL_API_BASE_URL = `http://${localHost}:8000/api`;
 // Replace this with the deployed API endpoint before distributing the app.
 export const PRODUCTION_API_BASE_URL = 'http://api.happymac.club:8443/api';
 
-let currentSettings: ApiEnvironmentSettings = {environment: 'local'};
+let currentSettings: ApiEnvironmentSettings = {environment: 'production'};
 
 function resolvedApiBaseUrl(settings = currentSettings) {
   return settings.environment === 'production' ? PRODUCTION_API_BASE_URL : LOCAL_API_BASE_URL;
@@ -48,7 +48,7 @@ export async function loadApiEnvironmentSettings() {
     try {
       currentSettings = toSettings(JSON.parse(stored));
     } catch {
-      currentSettings = {environment: 'local'};
+      currentSettings = {environment: 'production'};
     }
   }
   return currentSettings;

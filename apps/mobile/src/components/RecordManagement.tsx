@@ -397,13 +397,14 @@ function RecordCard({record, onDetail, onRetry, onDelete}: {record: RecordSummar
   const canRetry = !record.task || !ACTIVE_STATUSES.includes(status);
   const statusLabel = taskLabel(record.task);
   const keywordPlaceholder = status === 'completed' ? '暂无情感关键词' : '情感关键词生成中';
+  const emotionKeywords = Array.isArray(record.emotion_keywords) ? record.emotion_keywords : [];
   return (
     <View style={styles.recordCard}>
       <View style={styles.recordTopRow}>
         <View style={styles.recordTitleWrap}><View style={[styles.recordSignal, status === 'completed' && styles.recordSignalCompleted, status === 'failed' && styles.recordSignalFailed]} /><Text numberOfLines={1} ellipsizeMode="tail" style={styles.recordTitle}>{record.subject_id}</Text></View>
         <Text numberOfLines={1} style={[styles.statusPill, status === 'failed' && styles.statusPillFailed, hasNotice && styles.statusPillWarning, status === 'completed' && !hasNotice && styles.statusPillCompleted]}>{statusLabel}</Text>
       </View>
-      {record.emotion_keywords.length > 0 ? <View style={styles.keywordRow}>{record.emotion_keywords.map(keyword => {
+      {emotionKeywords.length > 0 ? <View style={styles.keywordRow}>{emotionKeywords.map(keyword => {
         const {category, value} = emotionKeywordParts(keyword);
         return <View key={keyword} style={styles.keywordPill}>{category ? <Text style={styles.keywordCategory}>{category} · </Text> : null}<Text style={styles.keywordValue}>{value}</Text></View>;
       })}</View> : <Text style={styles.recordPendingText}>{keywordPlaceholder}</Text>}

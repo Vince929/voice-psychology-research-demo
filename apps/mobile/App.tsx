@@ -184,8 +184,6 @@ export default function App() {
       );
       await resumeUpload(draft);
       setAudioUri('');
-      setRecordsReturnStep('record');
-      setStep('records');
       showNotice('录音已提交，正在等待转录任务处理。继续采集会沿用当前匿名编号。', 'success');
     } catch {
       showNotice('上传已暂停，重新打开应用后会自动继续。', 'info');
