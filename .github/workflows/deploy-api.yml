@@ -55,7 +55,6 @@ jobs:
               fi
             }
 
-            upsert_env "DATABASE_URL" "mysql+pymysql://voice_demo_app:${{ vars.MYSQL_PASSWORD }}@mysql:3306/voice_psychology_demo?charset=utf8mb4"
             upsert_env "AUDIO_COS_BUCKET" "${{ vars.AUDIO_COS_BUCKET }}"
             upsert_env "AUDIO_COS_REGION" "${{ vars.AUDIO_COS_REGION }}"
             upsert_env "AUDIO_COS_SECRET_ID" "${{ vars.AUDIO_COS_SECRET_ID }}"
@@ -66,19 +65,25 @@ jobs:
             upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
             upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
 
-            export MYSQL_PASSWORD="${{ vars.MYSQL_PASSWORD }}"
-            if [[ -z "$MYSQL_PASSWORD" ]]; then
-              echo "MYSQL_PASSWORD GitHub Variable must be configured" >&2
+            # Keep the database URL managed in the server-side .env, but make it valid from
+            # inside the API/worker containers. The shared MySQL master is reachable by its
+            # Docker service name, not by the container-local 127.0.0.1 address.
+            DATABASE_URL_VALUE="$(grep -m1 '^DATABASE_URL=' "$ENV_FILE" | cut -d '=' -f2-)"
+            if [[ -z "$DATABASE_URL_VALUE" ]]; then
+              echo "DATABASE_URL must be configured in $ENV_FILE" >&2
               exit 1
             fi
-            export MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD"
-            export MYSQL_DATABASE="voice_psychology_demo"
-            export MYSQL_USER="voice_demo_app"
-            docker compose -f docker-compose.prod.yml build api
-            if ! docker compose -f docker-compose.prod.yml up -d --wait mysql; then
-              docker compose -f docker-compose.prod.yml logs mysql
+            DATABASE_URL_VALUE="${DATABASE_URL_VALUE/#mysql:\/\//mysql+pymysql://}"
+            DATABASE_URL_VALUE="${DATABASE_URL_VALUE/@127.0.0.1:3306\/@mysql-master:3306/}"
+            upsert_env "DATABASE_URL" "$DATABASE_URL_VALUE"
+
+            export STARLOG_NETWORK="$(docker inspect --format '{{range $network, $_ := .NetworkSettings.Networks}}{{$network}}{{end}}' starlog-mysql-master)"
+            if [[ -z "$STARLOG_NETWORK" ]]; then
+              echo "Unable to resolve the Docker network for starlog-mysql-master" >&2
               exit 1
             fi
+            docker compose -f docker-compose.prod.yml build api worker
+            echo "Using shared Starlog MySQL network: $STARLOG_NETWORK"
             echo "Applying Yoyo database migrations..."
             docker compose -f docker-compose.prod.yml run --rm --no-deps api sh -ec '
               yoyo_database_url="$(printf "%s" "$DATABASE_URL" | sed "s#^mysql+pymysql:#mysql:#")"
@@ -87,7 +92,7 @@ jobs:
               yoyo list --database "$yoyo_database_url" db/migrations
             '
             echo "Yoyo database migrations completed"
-            docker compose -f docker-compose.prod.yml up -d api worker
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans api worker
 
       - name: Done
         run: echo "Voice Psychology API deployment completed"

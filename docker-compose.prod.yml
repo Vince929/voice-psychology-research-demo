@@ -8,12 +8,10 @@ services:
       - "8443:8000"
     env_file:
       - apps/api/.env
-    depends_on:
-      mysql:
-        condition: service_healthy
     restart: unless-stopped
     networks:
       - voice-psychology-net
+      - starlog-net
 
   worker:
     build:
@@ -23,38 +21,13 @@ services:
     command: ["python", "-m", "app.worker"]
     env_file:
       - apps/api/.env
-    depends_on:
-      mysql:
-        condition: service_healthy
     restart: unless-stopped
     networks:
       - voice-psychology-net
-
-  mysql:
-    image: mysql:8.0
-    container_name: voice-psychology-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-voice_psychology_demo}
-      MYSQL_USER: ${MYSQL_USER:-voice_demo_app}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-      - "127.0.0.1:3308:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks:
-      - voice-psychology-net
-
-volumes:
-  mysql_data:
-
+      - starlog-net
 networks:
   voice-psychology-net:
     driver: bridge
+  starlog-net:
+    external: true
+    name: ${STARLOG_NETWORK:?STARLOG_NETWORK must identify the Starlog MySQL Docker network}
