@@ -301,7 +301,7 @@ function RecordingOrb({recording, submitting, onPress}: {recording: boolean; sub
         </View>
       </Pressable>
       <SignalBars active={recording} progress={wave} />
-      {!submitting ? <Text style={styles.orbTitle}>{recording ? '录音进行中' : '轻触麦克风开始录音'}</Text> : null}
+      <Text style={styles.orbTitle}>{submitting ? '录音提交中' : recording ? '录音进行中' : '轻触麦克风开始录音'}</Text>
     </View>
   );
 }
@@ -347,17 +347,17 @@ const styles = StyleSheet.create({
   subtitle: {fontSize: 15, lineHeight: 22, color: '#C4D8D0', marginTop: 8, fontWeight: '500'},
   stepRail: {flexDirection: 'row', alignItems: 'center', marginTop: 22, maxWidth: 220},
   stepDot: {width: 25, height: 25, borderRadius: 13, borderWidth: 1, borderColor: '#658A80', alignItems: 'center', justifyContent: 'center'},
-  stepDotActive: {borderColor: '#F2B56B', backgroundColor: '#F2B56B'},
+  stepDotActive: {borderColor: '#9ED7C0', backgroundColor: '#9ED7C0'},
   stepDotText: {fontSize: 11, color: '#A9C2BA', fontWeight: '800'},
   stepDotTextActive: {color: '#153B36'},
   stepLine: {height: 1, flex: 1, marginHorizontal: 6, backgroundColor: '#55786F'},
-  stepLineActive: {backgroundColor: '#F2B56B'},
+  stepLineActive: {backgroundColor: '#9ED7C0'},
   content: {paddingHorizontal: 20, paddingTop: 20, paddingBottom: 44},
   recordContent: {paddingBottom: 236},
   recordsContent: {paddingBottom: 140},
   section: {gap: 18},
   introMark: {flexDirection: 'row', alignItems: 'center', gap: 9},
-  introMarkText: {fontSize: 13, letterSpacing: 1.4, fontWeight: '900', color: '#D76B50'},
+  introMarkText: {fontSize: 13, letterSpacing: 1.4, fontWeight: '900', color: '#287A6A'},
   introMarkCaption: {fontSize: 12, color: '#75847B', fontWeight: '700'},
   heading: {fontSize: 29, letterSpacing: -0.9, fontWeight: '800', color: '#173A35'},
   body: {fontSize: 16, lineHeight: 26, color: '#4D625B'},
@@ -413,8 +413,8 @@ const styles = StyleSheet.create({
   actionHint: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7},
   actionHintDot: {width: 6, height: 6, borderRadius: 4, backgroundColor: '#E29A4B'},
   actionHintText: {fontSize: 12, color: '#728179', fontWeight: '700'},
-  button: {minHeight: 55, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20, backgroundColor: '#D86B51', borderRadius: 16, shadowColor: '#A64734', shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: {width: 0, height: 6}, elevation: 4},
-  buttonRecording: {backgroundColor: '#C54F3C'},
+  button: {minHeight: 55, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20, backgroundColor: '#1E6B5B', borderRadius: 16, shadowColor: '#123F38', shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: {width: 0, height: 6}, elevation: 4},
+  buttonRecording: {backgroundColor: '#155346'},
   buttonDisabled: {backgroundColor: '#C6C7BD', shadowOpacity: 0},
   buttonPressed: {transform: [{scale: 0.985}], shadowOpacity: 0.1},
   buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
