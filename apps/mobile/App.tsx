@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Animated,
+  BackHandler,
   Platform,
   Pressable,
   SafeAreaView,
@@ -11,9 +12,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {ApiEnvironmentSelector} from './src/components/ApiEnvironmentSelector';
 import {RecordManagement} from './src/components/RecordManagement';
 import {Toast} from './src/components/Toast';
-import {createUploadDraft, resumePendingUploads, resumeUpload} from './src/services/resumableUpload';
+import {ApiEnvironment, getApiEnvironmentSettings, loadApiEnvironmentSettings, setApiEnvironment} from './src/config/api';
+import {createUploadDraft, isDemoUploadModeEnabled, resumePendingUploads, resumeUpload, setDemoUploadMode} from './src/services/resumableUpload';
 import {recordingErrorMessage, requestMicrophonePermission, startRecording, stopRecording} from './src/services/recorder';
 
 type Step = 'consent' | 'subject' | 'record' | 'records';
@@ -67,6 +70,9 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [audioUri, setAudioUri] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [demoUploadMode, setDemoUploadModeState] = useState(isDemoUploadModeEnabled);
+  const [apiSettings, setApiSettings] = useState(getApiEnvironmentSettings);
+  const [environmentSelectorVisible, setEnvironmentSelectorVisible] = useState(false);
   const [notice, setNotice] = useState<{message: string; tone: NoticeTone} | null>(null);
 
   const showNotice = useCallback((message: string, tone: NoticeTone = 'info') => {
@@ -74,11 +80,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void resumePendingUploads().then(results => {
+    void (async () => {
+      const settings = await loadApiEnvironmentSettings();
+      setApiSettings(settings);
+      const results = await resumePendingUploads();
       if (results.length > 0) {
         showNotice('已恢复完成中断的录音上传，转录任务正在处理中。', 'success');
       }
-    });
+    })();
   }, [showNotice]);
 
   function goBack() {
@@ -91,6 +100,17 @@ export default function App() {
       setStep(STEPS[currentIndex - 1]);
     }
   }
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (step === 'consent') {
+        return false;
+      }
+      goBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [recordsReturnStep, step]);
 
   function startNewParticipant() {
     setSubjectId(createSubjectId());
@@ -121,11 +141,30 @@ export default function App() {
         showNotice('需要麦克风权限后才能录音，请在系统设置中开启。', 'error');
         return;
       }
-      await startRecording();
+      await startRecording(demoUploadMode);
       setRecording(true);
     } catch (error) {
       setRecording(false);
       showNotice(`录音未启动：${recordingErrorMessage(error)}`, 'error');
+    }
+  }
+
+  function toggleDemoUploadMode() {
+    const nextEnabled = !demoUploadMode;
+    setDemoUploadMode(nextEnabled);
+    setDemoUploadModeState(nextEnabled);
+    showNotice(nextEnabled ? '已开启演示慢传：新录音将分块缓慢上传。' : '已关闭演示慢传：新录音将按正常速度上传。', 'info');
+  }
+
+  async function saveApiEnvironment(environment: ApiEnvironment) {
+    try {
+      const settings = await setApiEnvironment(environment);
+      setApiSettings(settings);
+      showNotice(`已切换至${environment === 'production' ? '线上' : '本地'} API 环境。`, 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '环境配置保存失败。';
+      showNotice(message, 'error');
+      throw error;
     }
   }
 
@@ -145,6 +184,8 @@ export default function App() {
       );
       await resumeUpload(draft);
       setAudioUri('');
+      setRecordsReturnStep('record');
+      setStep('records');
       showNotice('录音已提交，正在等待转录任务处理。继续采集会沿用当前匿名编号。', 'success');
     } catch {
       showNotice('上传已暂停，重新打开应用后会自动继续。', 'info');
@@ -160,9 +201,13 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#153B36" />
-      <View style={[styles.header, !isHome && styles.compactHeader, {paddingTop: statusBarInset + (isHome ? 14 : 6)}]}>
+      <View style={[styles.header, !isHome && styles.compactHeader, {paddingTop: statusBarInset + (isHome ? 14 : 16)}]}>
         <View style={styles.headerTopLine}>
-          {isHome ? <View style={styles.backButtonSpacer} /> : <Pressable accessibilityLabel="返回上一页" style={({pressed}) => [styles.backButton, pressed && styles.pressed]} onPress={goBack}><Text style={styles.backButtonText}>‹ 返回</Text></Pressable>}
+          {isHome ? <Pressable accessibilityRole="button" accessibilityLabel="切换 API 环境" style={({pressed}) => [styles.environmentButton, pressed && styles.pressed]} onPress={() => setEnvironmentSelectorVisible(true)}>
+            <View style={styles.environmentDot} />
+            <Text style={styles.environmentButtonText}>{apiSettings.environment === 'production' ? '线上 API' : '本地 API'}</Text>
+            <Text style={styles.environmentButtonArrow}>切换</Text>
+          </Pressable> : <Pressable accessibilityLabel="返回上一页" style={({pressed}) => [styles.backButton, pressed && styles.pressed]} onPress={goBack}><Text style={styles.backButtonText}>‹ 返回</Text></Pressable>}
           <View style={styles.privacyPill}><View style={styles.privacyDot} /><Text style={styles.privacyText}>匿名采集</Text></View>
         </View>
         {isHome ? <>
@@ -185,7 +230,7 @@ export default function App() {
               style={({pressed}) => [styles.consentCard, consented && styles.consentCardActive, pressed && styles.pressed]}
             >
               <View style={[styles.consentIndicator, consented && styles.consentIndicatorActive]}>
-                {consented ? <Text style={styles.consentTick}>✓</Text> : <View style={styles.consentDot} />}
+                {consented ? <Text style={styles.consentTick}>✓</Text> : null}
               </View>
               <View style={styles.consentCopy}><Text style={styles.consentLabel}>我已阅读并理解采集说明</Text><Text style={styles.consentHint}>录音仅用于本次研究演示</Text></View>
             </Pressable>
@@ -212,7 +257,13 @@ export default function App() {
         {step === 'record' && (
           <View style={styles.section}>
             <View style={styles.introMark}><Text style={styles.introMarkText}>03</Text><Text style={styles.introMarkCaption}>保持自然</Text></View>
-            <Text style={styles.heading}>朗读采集</Text>
+            <View style={styles.recordHeadingRow}>
+              <Text style={styles.heading}>朗读采集</Text>
+              <Pressable accessibilityRole="switch" accessibilityState={{checked: demoUploadMode}} style={({pressed}) => [styles.uploadModeToggle, demoUploadMode && styles.uploadModeToggleActive, pressed && styles.pressed]} onPress={toggleDemoUploadMode}>
+                <Text style={styles.uploadModeLabel}>演示慢传</Text>
+                <View style={[styles.uploadModeIndicator, demoUploadMode && styles.uploadModeIndicatorActive]}><View style={[styles.uploadModeKnob, demoUploadMode && styles.uploadModeKnobActive]} /></View>
+              </Pressable>
+            </View>
             <Text style={styles.body}>选择适合的篇幅后，以自然连贯的节奏完成朗读。录音会上传至服务端转写，再生成实验性表达洞察。</Text>
             <Choice value={selectedPromptId} choices={READING_PROMPTS.map(prompt => prompt.id)} labels={READING_PROMPTS.map(prompt => prompt.label)} onChange={setSelectedPromptId} />
             <View style={styles.promptBox}>
@@ -225,6 +276,12 @@ export default function App() {
       </ScrollView>
       {step === 'record' ? <RecordingDock recording={recording} submitting={submitting} audioUri={audioUri} onRecordPress={toggleRecording} onRecordsPress={() => { setRecordsReturnStep('record'); setStep('records'); }} /> : null}
       {step === 'records' ? <RecordsActionDock onContinueCollection={continueCurrentParticipantCollection} onNewParticipant={startNewParticipant} /> : null}
+      <ApiEnvironmentSelector
+        environment={apiSettings.environment}
+        visible={environmentSelectorVisible}
+        onDismiss={() => setEnvironmentSelectorVisible(false)}
+        onSave={saveApiEnvironment}
+      />
       <Toast message={notice?.message ?? null} tone={notice?.tone} onDismiss={() => setNotice(null)} />
     </SafeAreaView>
   );
@@ -334,7 +391,7 @@ function PrimaryButton({label, disabled, onPress, recording}: {label: string; di
 const styles = StyleSheet.create({
   safeArea: {flex: 1, backgroundColor: '#F6F2EA'},
   header: {paddingHorizontal: 24, paddingTop: 14, paddingBottom: 25, backgroundColor: '#153B36', overflow: 'hidden'},
-  compactHeader: {paddingTop: 6, paddingBottom: 6},
+  compactHeader: {paddingTop: 16, paddingBottom: 8},
   headerTopLine: {height: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
   backButton: {minWidth: 76, paddingVertical: 9, marginLeft: -6},
   backButtonSpacer: {height: 38, minWidth: 76},
@@ -352,6 +409,10 @@ const styles = StyleSheet.create({
   stepDotTextActive: {color: '#153B36'},
   stepLine: {height: 1, flex: 1, marginHorizontal: 6, backgroundColor: '#55786F'},
   stepLineActive: {backgroundColor: '#9ED7C0'},
+  environmentButton: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.10)'},
+  environmentDot: {width: 7, height: 7, borderRadius: 4, backgroundColor: '#B8DDCB'},
+  environmentButtonText: {fontSize: 12, fontWeight: '800', color: '#E8F4ED'},
+  environmentButtonArrow: {fontSize: 11, fontWeight: '800', color: '#B8DDCB'},
   content: {paddingHorizontal: 20, paddingTop: 20, paddingBottom: 44},
   recordContent: {paddingBottom: 236},
   recordsContent: {paddingBottom: 140},
@@ -365,7 +426,6 @@ const styles = StyleSheet.create({
   consentCardActive: {borderColor: '#80AE9C', backgroundColor: '#E9F2EB'},
   consentIndicator: {width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: '#91A69D', alignItems: 'center', justifyContent: 'center'},
   consentIndicatorActive: {backgroundColor: '#1E6B5B', borderColor: '#1E6B5B'},
-  consentDot: {width: 8, height: 8, borderRadius: 4, backgroundColor: '#D5DFD9'},
   consentTick: {color: '#FFFFFF', fontSize: 17, fontWeight: '800', lineHeight: 20, includeFontPadding: false},
   consentCopy: {flex: 1, gap: 3},
   consentLabel: {fontSize: 16, lineHeight: 22, color: '#183C36', fontWeight: '800'},
@@ -380,6 +440,14 @@ const styles = StyleSheet.create({
   choiceText: {color: '#4C625B', fontSize: 14, fontWeight: '600'},
   choiceTextActive: {color: '#FFFFFF', fontWeight: '800'},
   promptBox: {gap: 10, padding: 20, borderRadius: 20, backgroundColor: '#FFF4DD', borderLeftWidth: 4, borderLeftColor: '#E69B4C'},
+  recordHeadingRow: {flexDirection: 'row', alignItems: 'center', gap: 26},
+  uploadModeToggle: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 99, borderWidth: 1, borderColor: '#D9DFD6', backgroundColor: '#FFFCF6'},
+  uploadModeToggleActive: {borderColor: '#D6B77F', backgroundColor: '#FFF7E9'},
+  uploadModeIndicator: {width: 34, height: 21, justifyContent: 'center', paddingHorizontal: 3, borderRadius: 99, backgroundColor: '#B5C1BA'},
+  uploadModeIndicatorActive: {backgroundColor: '#D28A35'},
+  uploadModeKnob: {width: 17, height: 17, borderRadius: 9, backgroundColor: '#FFFFFF'},
+  uploadModeKnobActive: {alignSelf: 'flex-end'},
+  uploadModeLabel: {fontSize: 12, fontWeight: '800', color: '#314F47'},
   promptLabel: {fontSize: 12, letterSpacing: 1.2, fontWeight: '900', color: '#A56826'},
   prompt: {fontSize: 19, lineHeight: 32, color: '#49351E', fontWeight: '600'},
   recordingDock: {position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},

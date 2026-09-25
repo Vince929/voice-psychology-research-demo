@@ -5,7 +5,6 @@ export type ApiEnvironment = 'local' | 'production';
 
 type ApiEnvironmentSettings = {
   environment: ApiEnvironment;
-  productionApiBaseUrl: string;
 };
 
 const API_ENVIRONMENT_STORAGE_KEY = '@voice-psychology/api-environment/v1';
@@ -14,31 +13,13 @@ const API_ENVIRONMENT_STORAGE_KEY = '@voice-psychology/api-environment/v1';
 const localHost = Platform.select({android: '127.0.0.1', default: '127.0.0.1'});
 export const LOCAL_API_BASE_URL = `http://${localHost}:8000/api`;
 
-// You can set a team-wide default here. A URL saved from the app takes precedence.
-export const PRODUCTION_API_BASE_URL = '';
+// Replace this with the deployed API endpoint before distributing the app.
+export const PRODUCTION_API_BASE_URL = 'http://api.happymac.club:8443/api';
 
-let currentSettings: ApiEnvironmentSettings = {
-  environment: 'local',
-  productionApiBaseUrl: PRODUCTION_API_BASE_URL,
-};
-
-function normalizeApiBaseUrl(value: string) {
-  const baseUrl = value.trim().replace(/\/+$/, '');
-  const parsedUrl = new URL(baseUrl);
-  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-    throw new Error('API 地址必须以 http:// 或 https:// 开头。');
-  }
-  return baseUrl;
-}
+let currentSettings: ApiEnvironmentSettings = {environment: 'local'};
 
 function resolvedApiBaseUrl(settings = currentSettings) {
-  if (settings.environment === 'production') {
-    if (!settings.productionApiBaseUrl) {
-      throw new Error('请先填写线上 API 地址。');
-    }
-    return settings.productionApiBaseUrl;
-  }
-  return LOCAL_API_BASE_URL;
+  return settings.environment === 'production' ? PRODUCTION_API_BASE_URL : LOCAL_API_BASE_URL;
 }
 
 function toSettings(value: unknown): ApiEnvironmentSettings {
@@ -46,12 +27,7 @@ function toSettings(value: unknown): ApiEnvironmentSettings {
     return currentSettings;
   }
   const stored = value as Partial<ApiEnvironmentSettings>;
-  return {
-    environment: stored.environment === 'production' ? 'production' : 'local',
-    productionApiBaseUrl: typeof stored.productionApiBaseUrl === 'string'
-      ? stored.productionApiBaseUrl
-      : PRODUCTION_API_BASE_URL,
-  };
+  return {environment: stored.environment === 'production' ? 'production' : 'local'};
 }
 
 async function persistSettings() {
@@ -71,34 +47,15 @@ export async function loadApiEnvironmentSettings() {
   if (stored) {
     try {
       currentSettings = toSettings(JSON.parse(stored));
-      if (currentSettings.productionApiBaseUrl) {
-        currentSettings.productionApiBaseUrl = normalizeApiBaseUrl(currentSettings.productionApiBaseUrl);
-      }
-      if (currentSettings.environment === 'production' && !currentSettings.productionApiBaseUrl) {
-        currentSettings.environment = 'local';
-      }
     } catch {
-      currentSettings = {
-        environment: 'local',
-        productionApiBaseUrl: PRODUCTION_API_BASE_URL,
-      };
+      currentSettings = {environment: 'local'};
     }
   }
   return currentSettings;
 }
 
 export async function setApiEnvironment(environment: ApiEnvironment) {
-  resolvedApiBaseUrl({...currentSettings, environment});
   currentSettings = {...currentSettings, environment};
-  await persistSettings();
-  return currentSettings;
-}
-
-export async function setProductionApiBaseUrl(value: string) {
-  currentSettings = {
-    ...currentSettings,
-    productionApiBaseUrl: normalizeApiBaseUrl(value),
-  };
   await persistSettings();
   return currentSettings;
 }

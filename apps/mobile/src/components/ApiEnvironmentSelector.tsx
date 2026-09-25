@@ -1,32 +1,29 @@
 import React, {useEffect, useState} from 'react';
-import {Modal, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Modal, Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {ApiEnvironment, LOCAL_API_BASE_URL} from '../config/api';
+import {ApiEnvironment, LOCAL_API_BASE_URL, PRODUCTION_API_BASE_URL} from '../config/api';
 
 type ApiEnvironmentSelectorProps = {
   environment: ApiEnvironment;
-  productionApiBaseUrl: string;
   visible: boolean;
   onDismiss: () => void;
-  onSave: (environment: ApiEnvironment, productionApiBaseUrl: string) => Promise<void>;
+  onSave: (environment: ApiEnvironment) => Promise<void>;
 };
 
-export function ApiEnvironmentSelector({environment, productionApiBaseUrl, visible, onDismiss, onSave}: ApiEnvironmentSelectorProps) {
+export function ApiEnvironmentSelector({environment, visible, onDismiss, onSave}: ApiEnvironmentSelectorProps) {
   const [selectedEnvironment, setSelectedEnvironment] = useState<ApiEnvironment>(environment);
-  const [apiBaseUrl, setApiBaseUrl] = useState(productionApiBaseUrl);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
       setSelectedEnvironment(environment);
-      setApiBaseUrl(productionApiBaseUrl);
     }
-  }, [environment, productionApiBaseUrl, visible]);
+  }, [environment, visible]);
 
   async function handleSave() {
     setSaving(true);
     try {
-      await onSave(selectedEnvironment, apiBaseUrl);
+      await onSave(selectedEnvironment);
       onDismiss();
     } finally {
       setSaving(false);
@@ -38,7 +35,7 @@ export function ApiEnvironmentSelector({environment, productionApiBaseUrl, visib
       <View style={styles.panel}>
         <Text style={styles.eyebrow}>API CONNECTION</Text>
         <Text style={styles.title}>切换服务环境</Text>
-        <Text style={styles.description}>本地环境适用于调试；线上环境需要填写部署后的 API 地址。</Text>
+        <Text style={styles.description}>服务地址由应用配置统一维护，切换后新请求将立即使用对应环境。</Text>
         <View style={styles.optionGroup}>
           <Pressable accessibilityRole="radio" accessibilityState={{checked: selectedEnvironment === 'local'}} style={({pressed}) => [styles.option, selectedEnvironment === 'local' && styles.optionActive, pressed && styles.pressed]} onPress={() => setSelectedEnvironment('local')}>
             <Text style={styles.optionTitle}>本地 API</Text>
@@ -46,24 +43,12 @@ export function ApiEnvironmentSelector({environment, productionApiBaseUrl, visib
           </Pressable>
           <Pressable accessibilityRole="radio" accessibilityState={{checked: selectedEnvironment === 'production'}} style={({pressed}) => [styles.option, selectedEnvironment === 'production' && styles.optionActive, pressed && styles.pressed]} onPress={() => setSelectedEnvironment('production')}>
             <Text style={styles.optionTitle}>线上 API</Text>
-            <Text style={styles.optionDetail}>{apiBaseUrl || '请填写线上 API 地址'}</Text>
+            <Text style={styles.optionDetail}>{PRODUCTION_API_BASE_URL}</Text>
           </Pressable>
         </View>
-        <Text style={styles.inputLabel}>线上 API 地址</Text>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!saving}
-          keyboardType="url"
-          placeholder="https://example.com/api"
-          placeholderTextColor="#91A39B"
-          style={styles.input}
-          value={apiBaseUrl}
-          onChangeText={setApiBaseUrl}
-        />
         <View style={styles.actions}>
           <Pressable disabled={saving} style={({pressed}) => [styles.cancelButton, pressed && !saving && styles.pressed]} onPress={onDismiss}><Text style={styles.cancelButtonText}>取消</Text></Pressable>
-          <Pressable disabled={saving} style={({pressed}) => [styles.saveButton, saving && styles.saveButtonDisabled, pressed && !saving && styles.pressed]} onPress={() => void handleSave()}><Text style={styles.saveButtonText}>{saving ? '保存中…' : '保存并切换'}</Text></Pressable>
+          <Pressable disabled={saving} style={({pressed}) => [styles.saveButton, saving && styles.saveButtonDisabled, pressed && !saving && styles.pressed]} onPress={() => void handleSave()}><Text style={styles.saveButtonText}>{saving ? '保存中…' : '切换环境'}</Text></Pressable>
         </View>
       </View>
     </View>
@@ -81,8 +66,6 @@ const styles = StyleSheet.create({
   optionActive: {borderColor: '#287A6A', backgroundColor: '#E8F3ED'},
   optionTitle: {fontSize: 15, fontWeight: '800', color: '#173A35'},
   optionDetail: {fontSize: 12, lineHeight: 17, color: '#60766E'},
-  inputLabel: {marginTop: 2, fontSize: 13, fontWeight: '800', color: '#465E56'},
-  input: {height: 47, paddingHorizontal: 13, borderRadius: 12, borderWidth: 1, borderColor: '#D9DFD6', backgroundColor: '#F7F8F3', color: '#173A35', fontSize: 14},
   actions: {flexDirection: 'row', gap: 10, marginTop: 4},
   cancelButton: {flex: 1, minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#BFD4C8'},
   cancelButtonText: {fontSize: 15, fontWeight: '800', color: '#1D6258'},

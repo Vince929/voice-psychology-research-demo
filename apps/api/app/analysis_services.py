@@ -92,8 +92,39 @@ def transcribe_m4a(audio_bytes: bytes) -> tuple[str | None, dict[str, Any], str 
     return transcript or None, payload, payload.get("request_id")
 
 
+def _estimate_pitch_hz(samples: array, sample_rate: int) -> float | None:
+    """Estimate a voiced frame's fundamental frequency with normalized autocorrelation."""
+    frame_size = min(len(samples), max(1, round(sample_rate * 0.04)))
+    if frame_size < 8:
+        return None
+    start = max(0, (len(samples) - frame_size) // 2)
+    frame = samples[start : start + frame_size]
+    mean = sum(frame) / len(frame)
+    centered = [sample - mean for sample in frame]
+    energy = sum(sample * sample for sample in centered)
+    if energy <= 0:
+        return None
+    min_lag = max(1, sample_rate // 350)
+    max_lag = min(len(centered) // 2, sample_rate // 80)
+    best_lag = 0
+    best_correlation = 0.0
+    for lag in range(min_lag, max_lag + 1):
+        left = centered[:-lag]
+        right = centered[lag:]
+        denominator = math.sqrt(sum(sample * sample for sample in left) * sum(sample * sample for sample in right))
+        if denominator == 0:
+            continue
+        correlation = sum(left_sample * right_sample for left_sample, right_sample in zip(left, right)) / denominator
+        if correlation > best_correlation:
+            best_correlation = correlation
+            best_lag = lag
+    if best_lag == 0 or best_correlation < 0.55:
+        return None
+    return round(sample_rate / best_lag, 1)
+
+
 def extract_audio_features(audio_bytes: bytes) -> dict[str, Any] | None:
-    """Extract short-window loudness metrics from the original recording without retaining audio locally."""
+    """Extract short-window loudness and fundamental-frequency metrics without retaining audio locally."""
     try:
         with tempfile.TemporaryDirectory(prefix="voice-features-") as directory:
             input_path = Path(directory) / "recording.m4a"
@@ -130,15 +161,22 @@ def extract_audio_features(audio_bytes: bytes) -> dict[str, Any] | None:
 
     window_samples = max(1, sample_rate // 4)
     trend: list[dict[str, float | int]] = []
+    pitch_trend: list[dict[str, float | int | None]] = []
     dbfs_values: list[float] = []
+    pitch_values: list[float] = []
     for start in range(0, len(samples), window_samples):
         chunk = samples[start : start + window_samples]
         if not chunk:
             continue
         rms = math.sqrt(sum(sample * sample for sample in chunk) / len(chunk))
         dbfs = max(-80.0, 20 * math.log10(max(rms, 1.0) / 32768.0))
+        time_ms = round(start * 1000 / sample_rate)
         dbfs_values.append(dbfs)
-        trend.append({"time_ms": round(start * 1000 / sample_rate), "loudness_dbfs": round(dbfs, 1)})
+        trend.append({"time_ms": time_ms, "loudness_dbfs": round(dbfs, 1)})
+        pitch_hz = _estimate_pitch_hz(chunk, sample_rate) if dbfs > -55 else None
+        if pitch_hz is not None:
+            pitch_values.append(pitch_hz)
+        pitch_trend.append({"time_ms": time_ms, "pitch_hz": pitch_hz})
 
     if not dbfs_values:
         return None
@@ -154,6 +192,12 @@ def extract_audio_features(audio_bytes: bytes) -> dict[str, Any] | None:
             "dynamic_range_db": round(high_dbfs - low_dbfs, 1),
         },
         "volume_trend": trend,
+        "pitch_summary": {
+            "voiced_frame_count": len(pitch_values),
+            "average_hz": round(sum(pitch_values) / len(pitch_values), 1) if pitch_values else None,
+            "range_hz": round(max(pitch_values) - min(pitch_values), 1) if pitch_values else None,
+        },
+        "pitch_trend": pitch_trend,
     }
 
 
@@ -190,7 +234,10 @@ def build_analysis_input(
         "speech_speed_summary": _numeric_metric_summary(sentences, "speech_speed"),
         "emotional_energy_summary": _numeric_metric_summary(sentences, "emotional_energy"),
         "sentences": sentences,
-        "audio_features": audio_features,
+        "audio_features": {
+            "loudness_summary": audio_features.get("summary") if audio_features else None,
+            "pitch_summary": audio_features.get("pitch_summary") if audio_features else None,
+        },
     }
 
 

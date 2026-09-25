@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-import {API_BASE_URL} from '../config/api';
+import {getApiBaseUrl} from '../config/api';
 
 export type Subject = {
   subject_id: string;
@@ -59,6 +59,15 @@ export type AudioFeatures = {
     time_ms: number;
     loudness_dbfs: number;
   }>;
+  pitch_summary?: {
+    voiced_frame_count: number;
+    average_hz: number | null;
+    range_hz: number | null;
+  };
+  pitch_trend?: Array<{
+    time_ms: number;
+    pitch_hz: number | null;
+  }>;
 };
 
 export type AnalysisResult = {
@@ -88,43 +97,47 @@ export type CollectionRecord = RecordSummary & {
   analysis_result: AnalysisResult | null;
 };
 
-const client = axios.create({baseURL: API_BASE_URL, timeout: 15000});
+const client = axios.create({timeout: 15000});
+
+function requestConfig() {
+  return {baseURL: getApiBaseUrl()};
+}
 
 export async function checkApiHealth() {
-  return client.get('/health');
+  return client.get('/health', requestConfig());
 }
 
 export async function listRecords(): Promise<RecordSummary[]> {
-  const response = await client.get<RecordSummary[]>('/records');
+  const response = await client.get<RecordSummary[]>('/records', requestConfig());
   return response.data;
 }
 
 export async function getRecord(recordId: number): Promise<CollectionRecord> {
-  const response = await client.get<CollectionRecord>(`/records/${recordId}`);
+  const response = await client.get<CollectionRecord>(`/records/${recordId}`, requestConfig());
   return response.data;
 }
 
 export async function deleteRecord(recordId: number) {
-  await client.delete(`/records/${recordId}`);
+  await client.delete(`/records/${recordId}`, requestConfig());
 }
 
 export async function deleteSubjectRecords(subjectId: string) {
-  const response = await client.delete<{deleted_count: number}>(`/subjects/${encodeURIComponent(subjectId)}`);
+  const response = await client.delete<{deleted_count: number}>(`/subjects/${encodeURIComponent(subjectId)}`, requestConfig());
   return response.data;
 }
 
 export async function retryAnalysis(recordId: number) {
-  const response = await client.post<{record_id: number; task: AnalysisTask}>(`/records/${recordId}/analysis/retry`);
+  const response = await client.post<{record_id: number; task: AnalysisTask}>(`/records/${recordId}/analysis/retry`, undefined, requestConfig());
   return response.data;
 }
 
 export async function cancelAnalysis(recordId: number) {
-  const response = await client.post<{record_id: number; task: AnalysisTask}>(`/records/${recordId}/analysis/cancel`);
+  const response = await client.post<{record_id: number; task: AnalysisTask}>(`/records/${recordId}/analysis/cancel`, undefined, requestConfig());
   return response.data;
 }
 
 export function getAudioUrl(recordId: number) {
-  return `${API_BASE_URL}/records/${recordId}/audio`;
+  return `${getApiBaseUrl()}/records/${recordId}/audio`;
 }
 
 export async function submitRecord(subject: Subject, audioUri: string, idempotencyKey: string) {
@@ -137,6 +150,7 @@ export async function submitRecord(subject: Subject, audioUri: string, idempoten
     name: 'voice-sample.m4a',
   } as never);
   const response = await client.post<{record_id: number; task: AnalysisTask; idempotent: boolean}>('/records', form, {
+    ...requestConfig(),
     headers: {'Content-Type': 'multipart/form-data'},
   });
   return response.data;

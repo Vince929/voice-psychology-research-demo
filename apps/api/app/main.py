@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -27,8 +28,11 @@ app.add_middleware(
 )
 
 
+logger = logging.getLogger(__name__)
+
 TASK_ACTIVE_STATUSES = {"pending", "transcribing", "analyzing"}
 MAX_MULTIPART_PARTS = 10_000
+COS_MIN_MULTIPART_PART_SIZE_BYTES = 1024 * 1024
 
 
 def task_summary(task: AnalysisTask | None) -> dict | None:
@@ -143,6 +147,7 @@ def create_upload_session(payload: dict, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=422, detail="录音文件大小必须为正整数。")
     if suffix not in {".m4a", ".aac"}:
         raise HTTPException(status_code=422, detail="仅支持 m4a 或 aac 格式的录音文件。")
+    restart_multipart_upload = payload.get("restart_multipart_upload") is True
     session = db.get(UploadSession, str(payload.get("upload_id") or "")) if payload.get("upload_id") else None
     if session is not None and session.idempotency_key != idempotency_key:
         raise HTTPException(status_code=409, detail="上传会话与当前录音不匹配。")
@@ -151,6 +156,17 @@ def create_upload_session(payload: dict, db: Session = Depends(get_db)) -> dict:
     if session is not None:
         if session.total_bytes != total_bytes:
             raise HTTPException(status_code=409, detail="上传会话中的文件大小与当前录音不匹配。")
+        if not restart_multipart_upload or session.status == "completed":
+            return upload_session_summary(session)
+        try:
+            audio_cos_storage.abort_multipart_upload(session.object_key, session.cos_upload_id)
+        except Exception:
+            logger.exception("Failed to abort invalid multipart upload session: upload_id=%s", session.id)
+        session.object_key, session.cos_upload_id = audio_cos_storage.create_multipart_upload(suffix, content_type)
+        session.uploaded_parts = []
+        db.commit()
+        db.refresh(session)
+        logger.info("Restarted multipart upload session: upload_id=%s", session.id)
         return upload_session_summary(session)
     object_key, cos_upload_id = audio_cos_storage.create_multipart_upload(suffix, content_type)
     session = UploadSession(
@@ -193,7 +209,14 @@ async def upload_session_part(upload_id: str, part_number: int, request: Request
     body = await request.body()
     if not body:
         raise HTTPException(status_code=422, detail="上传分片不能为空。")
-    etag = audio_cos_storage.upload_part(session.object_key, session.cos_upload_id, part_number, body)
+    uploaded_bytes = sum(int(part["size"]) for part in parts)
+    if len(body) < COS_MIN_MULTIPART_PART_SIZE_BYTES and uploaded_bytes + len(body) < session.total_bytes:
+        raise HTTPException(status_code=422, detail="COS 要求除最后一块外每个分块至少为 1 MiB，请重新继续上传。")
+    try:
+        etag = audio_cos_storage.upload_part(session.object_key, session.cos_upload_id, part_number, body)
+    except Exception as error:
+        logger.exception("COS multipart part upload failed: upload_id=%s part_number=%s body_size=%s", upload_id, part_number, len(body))
+        raise HTTPException(status_code=502, detail="录音分块上传失败，请稍后重试。") from error
     session.uploaded_parts = sorted([*parts, {"part_number": part_number, "etag": etag, "size": len(body)}], key=lambda part: part["part_number"])
     db.commit()
     db.refresh(session)
@@ -224,6 +247,7 @@ def complete_upload_session(upload_id: str, payload: dict, db: Session = Depends
         db.commit()
     except Exception as error:
         db.rollback()
+        logger.exception("COS multipart upload completion failed: upload_id=%s", upload_id)
         raise HTTPException(status_code=502, detail="录音上传完成失败，请稍后重试。") from error
     db.refresh(record)
     db.refresh(record.analysis_task)

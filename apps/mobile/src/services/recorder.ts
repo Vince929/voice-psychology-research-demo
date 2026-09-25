@@ -1,7 +1,7 @@
-import {NativeModules, PermissionsAndroid, Platform} from 'react-native';
+import {DeviceEventEmitter, NativeModules, PermissionsAndroid, Platform} from 'react-native';
 
 type VoiceRecorderModule = {
-  start(): Promise<string>;
+  start(demoUpload: boolean): Promise<string>;
   stop(): Promise<string>;
   getFileInfo(uri: string): Promise<{uri: string; size: number}>;
   readFileChunk(uri: string, offset: number, length: number): Promise<string>;
@@ -35,8 +35,8 @@ export async function requestMicrophonePermission() {
   return status === PermissionsAndroid.RESULTS.GRANTED;
 }
 
-export function startRecording() {
-  return getRecorder().start();
+export function startRecording(demoUpload = false) {
+  return getRecorder().start(demoUpload);
 }
 
 export function stopRecording() {
@@ -61,6 +61,11 @@ export function playRemoteAudio(url: string) {
 
 export function stopRemoteAudio() {
   return getRecorder().stopPlayback();
+}
+
+export function subscribeToPlaybackStopped(listener: () => void) {
+  const subscription = DeviceEventEmitter.addListener('VoiceRecorderPlaybackStopped', listener);
+  return () => subscription.remove();
 }
 
 export function recordingErrorMessage(error: unknown) {

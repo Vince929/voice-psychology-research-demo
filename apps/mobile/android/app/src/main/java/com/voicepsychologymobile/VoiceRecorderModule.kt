@@ -19,7 +19,7 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
   override fun getName(): String = "VoiceRecorder"
 
   @ReactMethod
-  fun start(promise: Promise) {
+  fun start(demoUpload: Boolean, promise: Promise) {
     if (recorder != null) {
       promise.reject("RECORDER_ACTIVE", "当前已有录音正在进行。")
       return
@@ -34,7 +34,8 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
       newRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
       newRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
       newRecorder.setAudioSamplingRate(44_100)
-      newRecorder.setAudioEncodingBitRate(128_000)
+      // Demo uploads use a larger but still commonly supported AAC bitrate, so a short recording reaches a 1 MiB upload part sooner.
+      newRecorder.setAudioEncodingBitRate(if (demoUpload) 512_000 else 128_000)
       newRecorder.setOutputFile(audioFile.absolutePath)
       newRecorder.prepare()
       newRecorder.start()
@@ -108,16 +109,18 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
         it.start()
         promise.resolve(null)
       }
-      newPlayer.setOnCompletionListener {
-        it.release()
-        if (player === it) {
+      newPlayer.setOnCompletionListener { completedPlayer ->
+        completedPlayer.release()
+        if (player === completedPlayer) {
           player = null
+          reactContext.emitDeviceEvent("VoiceRecorderPlaybackStopped", null)
         }
       }
       newPlayer.setOnErrorListener { failedPlayer, _, _ ->
         failedPlayer.release()
         if (player === failedPlayer) {
           player = null
+          reactContext.emitDeviceEvent("VoiceRecorderPlaybackStopped", null)
         }
         promise.reject("AUDIO_PLAYBACK_FAILED", "无法播放该录音，请稍后重试。")
         true
@@ -135,8 +138,9 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
 
   @ReactMethod
   fun stopPlayback(promise: Promise) {
-    player?.release()
+    val activePlayer = player
     player = null
+    activePlayer?.release()
     promise.resolve(null)
   }
 
