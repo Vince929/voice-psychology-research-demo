@@ -92,13 +92,20 @@ export default function App() {
     }
   }
 
-  function resetCollection() {
+  function startNewParticipant() {
     setSubjectId(createSubjectId());
     setAgeGroup('18-24');
     setGender('不透露');
     setLanguage('普通话');
     setRecordingEnvironment('安静室内');
     setAudioUri('');
+    setConsented(false);
+    setStep('consent');
+  }
+
+  function continueCurrentParticipantCollection() {
+    setAudioUri('');
+    setStep('record');
   }
 
   async function toggleRecording() {
@@ -138,8 +145,8 @@ export default function App() {
         createIdempotencyKey(),
       );
       await resumeUpload(draft);
-      resetCollection();
-      showNotice('录音已提交，正在等待转录任务处理。', 'success');
+      setAudioUri('');
+      showNotice('录音已提交，正在等待转录任务处理。继续采集会沿用当前匿名编号。', 'success');
     } catch {
       showNotice('上传已暂停，重新打开应用后会自动继续。', 'info');
     } finally {
@@ -215,7 +222,7 @@ export default function App() {
             </View>
           </View>
         )}
-        {step === 'records' ? <RecordManagement onStartNew={() => setStep('subject')} onNotice={showNotice} /> : null}
+        {step === 'records' ? <RecordManagement onContinueCollection={continueCurrentParticipantCollection} onNewParticipant={startNewParticipant} onNotice={showNotice} /> : null}
       </ScrollView>
       {step === 'record' ? <RecordingDock recording={recording} submitting={submitting} audioUri={audioUri} onRecordPress={toggleRecording} onRecordsPress={() => { setRecordsReturnStep('record'); setStep('records'); }} /> : null}
       <Toast message={notice?.message ?? null} tone={notice?.tone} onDismiss={() => setNotice(null)} />
@@ -234,7 +241,7 @@ function RecordingDock({recording, submitting, audioUri, onRecordPress, onRecord
       {recording ? <Text style={styles.recordingSafetyNote}>轻触暂停图标即可结束录音，系统将自动安全上传。</Text> : null}
       {submitting ? <Text style={styles.statusMessage}>正在加密提交并启动分析…</Text> : null}
       {!recording && audioUri && !submitting ? <Text style={styles.errorMessage}>自动提交未完成，请检查提示后重新录音。</Text> : null}
-      <Pressable style={({pressed}) => [styles.dockRecordsButton, pressed && styles.pressed]} onPress={onRecordsPress}><Text style={styles.dockRecordsButtonText}>查看录音文件列表</Text><Text style={styles.dockRecordsButtonArrow}>→</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="查看录音文件列表" hitSlop={8} style={({pressed}) => [styles.dockRecordsButton, pressed && styles.pressed]} onPress={onRecordsPress}><Text style={styles.dockRecordsButtonText}>查看录音文件列表</Text><Text style={styles.dockRecordsButtonArrow}>→</Text></Pressable>
     </View>
   );
 }
@@ -300,7 +307,7 @@ function SignalBars({active, progress}: {active: boolean; progress: Animated.Val
       {bars.map((height, index) => {
         const phase = (index % 4 + 1) * 0.16;
         const scaleY = active ? progress.interpolate({inputRange: [0, phase, Math.min(phase + 0.35, 1), 1], outputRange: [0.38, 1, 0.54, 0.38]}) : 0.35;
-        return <Animated.View key={height + index} style={[styles.signalBar, {height, backgroundColor: SIGNAL_BAR_COLORS[index], transform: [{scaleY}]}]} />;
+        return <Animated.View key={`${height}-${index}`} style={[styles.signalBar, {height, backgroundColor: SIGNAL_BAR_COLORS[index], transform: [{scaleY}]}]} />;
       })}
     </View>
   );
@@ -369,9 +376,9 @@ const styles = StyleSheet.create({
   promptLabel: {fontSize: 12, letterSpacing: 1.2, fontWeight: '900', color: '#A56826'},
   prompt: {fontSize: 19, lineHeight: 32, color: '#49351E', fontWeight: '600'},
   recordingDock: {position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
-  dockRecordsButton: {minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, borderRadius: 10},
-  dockRecordsButtonText: {fontSize: 12, fontWeight: '800', color: '#1D6258'},
-  dockRecordsButtonArrow: {fontSize: 13, fontWeight: '800', color: '#1D6258'},
+  dockRecordsButton: {alignSelf: 'stretch', minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, zIndex: 2, elevation: 0, backgroundColor: 'transparent'},
+  dockRecordsButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
+  dockRecordsButtonArrow: {fontSize: 15, fontWeight: '800', color: '#1D6258'},
   orbPanel: {alignItems: 'center', paddingTop: 0, paddingBottom: 0},
   orbButton: {borderRadius: 54},
   orbButtonPressed: {transform: [{scale: 0.96}], opacity: 0.9},

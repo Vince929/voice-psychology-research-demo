@@ -18,7 +18,8 @@ import {playRemoteAudio, recordingErrorMessage, stopRemoteAudio} from '../servic
 type NoticeTone = 'success' | 'error' | 'info';
 
 type RecordManagementProps = {
-  onStartNew: () => void;
+  onContinueCollection: () => void;
+  onNewParticipant: () => void;
   onNotice: (message: string, tone?: NoticeTone) => void;
 };
 
@@ -75,7 +76,7 @@ function taskLabel(task: RecordSummary['task'] | CollectionRecord['task']) {
   return task ? STATUS_LABELS[task.status] : STATUS_LABELS.failed;
 }
 
-export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) {
+export function RecordManagement({onContinueCollection, onNewParticipant, onNotice}: RecordManagementProps) {
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CollectionRecord | null>(null);
   const [loading, setLoading] = useState(false);
@@ -202,7 +203,7 @@ export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) 
       <View style={styles.titleRow}>
         <View style={styles.titleCopy}>
           <Text style={styles.heading}>录音文件</Text>
-          <Text style={styles.body}>转录和 AI 分析在后台任务中执行，处理中会自动刷新状态。</Text>
+          <Text style={styles.body}>同一匿名编号可连续采集多条录音，转录和 AI 分析在后台执行。</Text>
         </View>
         <Pressable style={({pressed}) => [styles.refreshButton, pressed && styles.pressed]} disabled={loading} onPress={() => void loadRecords()}>
           {loading ? <Text style={styles.refreshButtonText}>刷新中</Text> : <View style={styles.refreshButtonContent}><Text style={styles.refreshIcon}>↻</Text><Text style={styles.refreshButtonText}>刷新</Text></View>}
@@ -215,7 +216,10 @@ export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) 
         </View>
       ) : null}
       {records.map(record => <RecordCard key={record.id} record={record} onDetail={() => void showRecord(record.id)} onRetry={() => void handleRetry(record.id)} onDelete={() => confirmDeleteRecord(record)} />)}
-      <PrimaryButton label="开始新的采集" onPress={onStartNew} />
+      <PrimaryButton label="继续为当前参与者采集" onPress={onContinueCollection} />
+      <Pressable style={({pressed}) => [styles.newParticipantButton, pressed && styles.pressed]} onPress={onNewParticipant}>
+        <Text style={styles.newParticipantButtonText}>新建参与者（生成新匿名编号）</Text>
+      </Pressable>
       <Modal visible={selectedRecord !== null} animationType="slide" transparent onRequestClose={() => setSelectedRecord(null)}>
         {selectedRecord ? <RecordDetail record={selectedRecord} onClose={() => setSelectedRecord(null)} onPlay={() => void openAudio(selectedRecord.id)} onStop={() => void stopAudio()} onRetry={() => void handleRetry(selectedRecord.id)} onCancel={() => void handleCancel(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
       </Modal>
@@ -327,6 +331,8 @@ const styles = StyleSheet.create({
   buttonPressed: {transform: [{scale: 0.985}]},
   buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
   buttonArrow: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
+  newParticipantButton: {minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#BFD4C8', backgroundColor: '#F8FBF8'},
+  newParticipantButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
   emptyPanel: {padding: 25, borderRadius: 20, borderWidth: 1, borderColor: '#D9DED5', borderStyle: 'dashed', backgroundColor: '#FFFCF6', gap: 8},
   emptyTitle: {fontSize: 18, fontWeight: '800', color: '#173A35'},
   empty: {fontSize: 15, lineHeight: 22, color: '#61736B'},
