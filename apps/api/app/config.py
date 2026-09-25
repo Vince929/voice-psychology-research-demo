@@ -8,7 +8,7 @@ load_dotenv(BASE_DIR / ".env")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL must be configured")
+    raise RuntimeError("数据库连接配置缺失，请设置 DATABASE_URL。")
 
 AUDIO_COS_BUCKET = os.getenv("AUDIO_COS_BUCKET", "")
 AUDIO_COS_REGION = os.getenv("AUDIO_COS_REGION", "")

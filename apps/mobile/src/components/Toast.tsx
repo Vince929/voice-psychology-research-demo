@@ -1,5 +1,5 @@
-import React, {useEffect} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useRef} from 'react';
+import {Animated, StyleSheet, Text, View} from 'react-native';
 
 type ToastProps = {
   message: string | null;
@@ -8,33 +8,46 @@ type ToastProps = {
 };
 
 export function Toast({message, tone = 'info', onDismiss}: ToastProps) {
+  const translateY = useRef(new Animated.Value(-14)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     if (!message) {
       return;
     }
-    const timer = setTimeout(onDismiss, 1600);
+    opacity.setValue(0);
+    translateY.setValue(-14);
+    Animated.parallel([
+      Animated.timing(opacity, {toValue: 1, duration: 190, useNativeDriver: true}),
+      Animated.spring(translateY, {toValue: 0, damping: 16, stiffness: 210, mass: 0.72, useNativeDriver: true}),
+    ]).start();
+    const timer = setTimeout(onDismiss, 2400);
     return () => clearTimeout(timer);
-  }, [message, onDismiss]);
+  }, [message, onDismiss, opacity, translateY]);
 
   if (!message) {
     return null;
   }
 
+  const symbol = tone === 'success' ? '✓' : tone === 'error' ? '!' : 'i';
   return (
     <View pointerEvents="none" style={styles.container}>
-      <View style={[styles.toast, tone === 'success' && styles.success, tone === 'error' && styles.error]}>
-        <View style={styles.marker} />
+      <Animated.View style={[styles.toast, tone === 'success' && styles.success, tone === 'error' && styles.error, {opacity, transform: [{translateY}]}]}>
+        <View style={[styles.marker, tone === 'success' && styles.markerSuccess, tone === 'error' && styles.markerError]}><Text style={styles.markerText}>{symbol}</Text></View>
         <Text style={styles.message}>{message}</Text>
-      </View>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {position: 'absolute', top: '50%', left: 20, right: 20, zIndex: 20, transform: [{translateY: -36}]},
-  toast: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 15, borderRadius: 14, backgroundColor: '#163C36', shadowColor: '#163C36', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: {width: 0, height: 8}, elevation: 5},
-  success: {backgroundColor: '#1B6559'},
-  error: {backgroundColor: '#A43F35'},
-  marker: {width: 7, height: 7, borderRadius: 4, backgroundColor: '#D7EFE8'},
-  message: {flex: 1, color: '#FFFFFF', fontSize: 14, lineHeight: 20, fontWeight: '600'},
+  container: {position: 'absolute', top: '20%', left: 18, right: 18, zIndex: 20},
+  toast: {flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: '#173F39', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', shadowColor: '#102E2A', shadowOpacity: 0.28, shadowRadius: 18, shadowOffset: {width: 0, height: 9}, elevation: 7},
+  success: {backgroundColor: '#1D6A5A'},
+  error: {backgroundColor: '#A54335'},
+  marker: {width: 23, height: 23, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E9B35B'},
+  markerSuccess: {backgroundColor: '#BEE0CE'},
+  markerError: {backgroundColor: '#F6C7BD'},
+  markerText: {fontSize: 13, lineHeight: 16, color: '#163C36', fontWeight: '900'},
+  message: {flex: 1, color: '#FFFFFF', fontSize: 14, lineHeight: 20, fontWeight: '700'},
 });

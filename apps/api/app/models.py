@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -28,6 +28,24 @@ class CollectionRecord(Base):
     analysis_task: Mapped["AnalysisTask | None"] = relationship(
         back_populates="record", cascade="all, delete-orphan", uselist=False
     )
+
+
+class UploadSession(Base):
+    __tablename__ = "upload_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    subject: Mapped[dict] = mapped_column(JSON)
+    audio_filename: Mapped[str] = mapped_column(String(255))
+    audio_content_type: Mapped[str] = mapped_column(String(128), default="audio/mp4")
+    total_bytes: Mapped[int] = mapped_column(BigInteger)
+    object_key: Mapped[str] = mapped_column(String(512), unique=True)
+    cos_upload_id: Mapped[str] = mapped_column(String(512))
+    uploaded_parts: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(32), default="uploading", index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    record_id: Mapped[int | None] = mapped_column(ForeignKey("collection_records.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class AnalysisTask(Base):

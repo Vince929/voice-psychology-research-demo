@@ -7,7 +7,9 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import android.util.Base64
 import java.io.File
+import java.io.RandomAccessFile
 
 class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
   private var recorder: MediaRecorder? = null
@@ -19,11 +21,12 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
   @ReactMethod
   fun start(promise: Promise) {
     if (recorder != null) {
-      promise.reject("RECORDER_ACTIVE", "A recording is already in progress.")
+      promise.reject("RECORDER_ACTIVE", "当前已有录音正在进行。")
       return
     }
 
-    val audioFile = File(reactContext.cacheDir, "voice-${System.currentTimeMillis()}.m4a")
+    val recordingsDir = File(reactContext.filesDir, "recordings").apply { mkdirs() }
+    val audioFile = File(recordingsDir, "voice-${System.currentTimeMillis()}.m4a")
     val newRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(reactContext) else MediaRecorder()
 
     try {
@@ -41,8 +44,58 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
     } catch (error: Exception) {
       newRecorder.release()
       audioFile.delete()
-      promise.reject("RECORDING_START_FAILED", error.message ?: error.javaClass.simpleName, error)
+      promise.reject("RECORDING_START_FAILED", "无法开始录音，请检查麦克风权限后重试。", error)
     }
+  }
+
+  @ReactMethod
+  fun getFileInfo(uri: String, promise: Promise) {
+    val audioFile = File(uri.removePrefix("file://"))
+    if (!audioFile.isFile) {
+      promise.reject("AUDIO_FILE_MISSING", "本地录音文件不存在或已被删除。")
+      return
+    }
+    val result = com.facebook.react.bridge.Arguments.createMap()
+    result.putString("uri", "file://${audioFile.absolutePath}")
+    result.putDouble("size", audioFile.length().toDouble())
+    promise.resolve(result)
+  }
+
+  @ReactMethod
+  fun readFileChunk(uri: String, offset: Double, length: Int, promise: Promise) {
+    val audioFile = File(uri.removePrefix("file://"))
+    if (!audioFile.isFile) {
+      promise.reject("AUDIO_FILE_MISSING", "本地录音文件不存在或已被删除。")
+      return
+    }
+    if (offset < 0 || length <= 0) {
+      promise.reject("INVALID_FILE_RANGE", "读取录音文件的范围无效。")
+      return
+    }
+    try {
+      RandomAccessFile(audioFile, "r").use { file ->
+        file.seek(offset.toLong())
+        val buffer = ByteArray(length)
+        val bytesRead = file.read(buffer)
+        if (bytesRead <= 0) {
+          promise.resolve("")
+          return
+        }
+        promise.resolve(Base64.encodeToString(buffer.copyOf(bytesRead), Base64.NO_WRAP))
+      }
+    } catch (error: Exception) {
+      promise.reject("AUDIO_FILE_READ_FAILED", "无法读取本地录音文件，请重新录音后再试。", error)
+    }
+  }
+
+  @ReactMethod
+  fun deleteFile(uri: String, promise: Promise) {
+    val audioFile = File(uri.removePrefix("file://"))
+    if (!audioFile.exists() || audioFile.delete()) {
+      promise.resolve(null)
+      return
+    }
+    promise.reject("AUDIO_FILE_DELETE_FAILED", "无法删除本地录音文件。")
   }
 
   @ReactMethod
@@ -66,7 +119,7 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
         if (player === failedPlayer) {
           player = null
         }
-        promise.reject("AUDIO_PLAYBACK_FAILED", "The audio stream could not be played.")
+        promise.reject("AUDIO_PLAYBACK_FAILED", "无法播放该录音，请稍后重试。")
         true
       }
       player = newPlayer
@@ -76,7 +129,7 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
       if (player === newPlayer) {
         player = null
       }
-      promise.reject("AUDIO_PLAYBACK_FAILED", error.message ?: error.javaClass.simpleName, error)
+      promise.reject("AUDIO_PLAYBACK_FAILED", "无法播放该录音，请稍后重试。", error)
     }
   }
 
@@ -92,7 +145,7 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
     val activeRecorder = recorder
     val audioFile = outputFile
     if (activeRecorder == null || audioFile == null) {
-      promise.reject("RECORDER_INACTIVE", "No recording is in progress.")
+      promise.reject("RECORDER_INACTIVE", "当前没有正在进行的录音。")
       return
     }
 
@@ -101,7 +154,7 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
       promise.resolve("file://${audioFile.absolutePath}")
     } catch (error: RuntimeException) {
       audioFile.delete()
-      promise.reject("RECORDING_STOP_FAILED", error.message ?: error.javaClass.simpleName, error)
+      promise.reject("RECORDING_STOP_FAILED", "录音保存失败，请重新录音后再试。", error)
     } finally {
       activeRecorder.release()
       recorder = null

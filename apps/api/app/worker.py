@@ -36,7 +36,7 @@ def recover_expired_leases() -> None:
             elif task.attempt_count >= task.max_attempts:
                 task.status = "failed"
                 task.failed_stage = "worker"
-                task.error_message = "Analysis worker lease expired"
+                task.error_message = "分析任务处理超时，请重新分析。"
                 task.finished_at = now
             else:
                 task.status = "pending"
@@ -116,6 +116,15 @@ def process_task(task_id: int) -> None:
             task.record.transcript = transcript
             task.record.asr_result = asr_result
             task.asr_request_id = asr_request_id
+            task.lease_expires_at = None
+            if transcript is None:
+                task.status = "completed"
+                task.error_code = "no_speech_detected"
+                task.error_message = "未识别到有效语音内容，请确认录音时已靠近麦克风并清晰朗读。"
+                task.finished_at = datetime.utcnow()
+                db.commit()
+                logger.info("analysis completed without transcript task_id=%s", task_id)
+                return
             task.status = "analyzing"
             task.lease_expires_at = datetime.utcnow() + timedelta(seconds=WORKER_LEASE_SECONDS)
             db.commit()
@@ -138,7 +147,7 @@ def process_task(task_id: int) -> None:
         finish_failure(task_id, error.stage, str(error), error.retryable)
     except Exception:
         logger.exception("analysis task crashed task_id=%s", task_id)
-        finish_failure(task_id, "worker", "Unexpected worker error", True)
+        finish_failure(task_id, "worker", "分析任务处理异常，系统将自动重试。", True)
 
 
 def finish_failure(task_id: int, stage: str, message: str, retryable: bool) -> None:

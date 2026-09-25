@@ -18,6 +18,7 @@ export type AnalysisTask = {
   attempt_count: number;
   max_attempts: number;
   failed_stage: string | null;
+  error_code: string | null;
   error_message: string | null;
   created_at: string;
   started_at: string | null;

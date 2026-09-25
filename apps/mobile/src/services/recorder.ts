@@ -3,6 +3,9 @@ import {NativeModules, PermissionsAndroid, Platform} from 'react-native';
 type VoiceRecorderModule = {
   start(): Promise<string>;
   stop(): Promise<string>;
+  getFileInfo(uri: string): Promise<{uri: string; size: number}>;
+  readFileChunk(uri: string, offset: number, length: number): Promise<string>;
+  deleteFile(uri: string): Promise<void>;
   play(url: string): Promise<void>;
   stopPlayback(): Promise<void>;
 };
@@ -38,6 +41,18 @@ export function startRecording() {
 
 export function stopRecording() {
   return getRecorder().stop();
+}
+
+export function getRecordingFileInfo(uri: string) {
+  return getRecorder().getFileInfo(uri);
+}
+
+export function readRecordingFileChunk(uri: string, offset: number, length: number) {
+  return getRecorder().readFileChunk(uri, offset, length);
+}
+
+export function deleteRecordingFile(uri: string) {
+  return getRecorder().deleteFile(uri);
 }
 
 export function playRemoteAudio(url: string) {

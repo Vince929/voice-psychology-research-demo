@@ -25,9 +25,9 @@ class ExternalServiceError(RuntimeError):
         self.retryable = retryable
 
 
-def transcribe_m4a(audio_bytes: bytes) -> tuple[str, dict[str, Any], str | None]:
+def transcribe_m4a(audio_bytes: bytes) -> tuple[str | None, dict[str, Any], str | None]:
     if not all((TENCENTCLOUD_APP_ID, AUDIO_COS_SECRET_ID, AUDIO_COS_SECRET_KEY)):
-        raise ExternalServiceError("transcription", "Tencent Cloud ASR is not configured", False)
+        raise ExternalServiceError("transcription", "语音转写服务尚未完成配置，请联系管理员检查服务配置。", False)
 
     timestamp = int(time.time())
     query = {
@@ -62,23 +62,24 @@ def transcribe_m4a(audio_bytes: bytes) -> tuple[str, dict[str, Any], str | None]
             timeout=(10, 90),
         )
     except requests.RequestException as error:
-        raise ExternalServiceError("transcription", "Tencent Cloud ASR request failed", True) from error
+        raise ExternalServiceError("transcription", "语音转写服务请求失败，系统将自动重试。", True) from error
 
     if response.status_code >= 500 or response.status_code == 429:
-        raise ExternalServiceError("transcription", f"Tencent Cloud ASR returned HTTP {response.status_code}", True)
+        raise ExternalServiceError("transcription", f"语音转写服务暂时不可用（HTTP {response.status_code}），系统将自动重试。", True)
     if not response.ok:
-        raise ExternalServiceError("transcription", f"Tencent Cloud ASR returned HTTP {response.status_code}", False)
+        raise ExternalServiceError("transcription", f"语音转写服务返回异常（HTTP {response.status_code}），请稍后重新分析。", False)
 
     payload = response.json()
     if payload.get("code") != 0:
-        message = str(payload.get("message") or "Tencent Cloud ASR rejected the recording")
-        raise ExternalServiceError("transcription", message, False)
+        raise ExternalServiceError(
+            "transcription",
+            "语音转写服务未能处理该录音，请确认录音内容清晰后重新分析。",
+            False,
+        )
 
     results = payload.get("flash_result") or []
     transcript = "\n".join(str(item.get("text", "")).strip() for item in results).strip()
-    if not transcript:
-        raise ExternalServiceError("transcription", "Tencent Cloud ASR returned an empty transcript", False)
-    return transcript, payload, payload.get("request_id")
+    return transcript or None, payload, payload.get("request_id")
 
 
 def build_analysis_input(transcript: str, asr_result: dict[str, Any]) -> dict[str, Any]:
@@ -102,7 +103,7 @@ def build_analysis_input(transcript: str, asr_result: dict[str, Any]) -> dict[st
 
 def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     if not DEEPSEEK_API_KEY:
-        raise ExternalServiceError("analysis", "DeepSeek is not configured", False)
+        raise ExternalServiceError("analysis", "AI 分析服务尚未完成配置，请联系管理员检查服务配置。", False)
 
     prompt = {
         "role": "system",
@@ -123,19 +124,19 @@ def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dic
             timeout=(10, 90),
         )
     except requests.RequestException as error:
-        raise ExternalServiceError("analysis", "DeepSeek request failed", True) from error
+        raise ExternalServiceError("analysis", "AI 分析服务请求失败，系统将自动重试。", True) from error
 
     if response.status_code >= 500 or response.status_code == 429:
-        raise ExternalServiceError("analysis", f"DeepSeek returned HTTP {response.status_code}", True)
+        raise ExternalServiceError("analysis", f"AI 分析服务暂时不可用（HTTP {response.status_code}），系统将自动重试。", True)
     if not response.ok:
-        raise ExternalServiceError("analysis", f"DeepSeek returned HTTP {response.status_code}", False)
+        raise ExternalServiceError("analysis", f"AI 分析服务返回异常（HTTP {response.status_code}），请稍后重新分析。", False)
 
     payload = response.json()
     try:
         content = payload["choices"][0]["message"]["content"]
         result = json.loads(content)
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-        raise ExternalServiceError("analysis", "DeepSeek did not return valid JSON", False) from error
+        raise ExternalServiceError("analysis", "AI 分析服务返回的数据格式异常，请稍后重新分析。", False) from error
 
     _validate_analysis_result(result)
     return result, payload.get("id")
@@ -144,10 +145,10 @@ def analyze_expression(transcript: str, asr_result: dict[str, Any]) -> tuple[dic
 def _validate_analysis_result(result: dict[str, Any]) -> None:
     required_keys = {"expression_state", "vitality_score", "tension_score", "evidence", "summary", "suggestion", "disclaimer"}
     if not required_keys.issubset(result):
-        raise ExternalServiceError("analysis", "DeepSeek result is missing required fields", False)
+        raise ExternalServiceError("analysis", "AI 分析结果不完整，请稍后重新分析。", False)
     if not all(isinstance(result[key], int) and 0 <= result[key] <= 100 for key in ("vitality_score", "tension_score")):
-        raise ExternalServiceError("analysis", "DeepSeek scores are outside the allowed range", False)
+        raise ExternalServiceError("analysis", "AI 分析结果不符合预期，请稍后重新分析。", False)
     prohibited = ("抑郁", "焦虑", "疾病", "MBTI")
     result_text = json.dumps({key: value for key, value in result.items() if key != "disclaimer"}, ensure_ascii=False)
     if any(word in result_text for word in prohibited):
-        raise ExternalServiceError("analysis", "DeepSeek result contains prohibited health or personality content", False)
+        raise ExternalServiceError("analysis", "AI 分析结果包含不适合展示的内容，请重新分析。", False)

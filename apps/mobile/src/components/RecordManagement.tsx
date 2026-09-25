@@ -44,6 +44,37 @@ function formatDuration(duration?: number) {
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
+const LEGACY_ERROR_MESSAGES: Record<string, string> = {
+  'Tencent Cloud ASR returned an empty transcript': '未识别到有效语音内容，请确认录音时已靠近麦克风并清晰朗读。',
+  'Tencent Cloud ASR is not configured': '语音转写服务尚未完成配置，请联系管理员检查服务配置。',
+  'Tencent Cloud ASR request failed': '语音转写服务请求失败，系统将自动重试。',
+  'DeepSeek is not configured': 'AI 分析服务尚未完成配置，请联系管理员检查服务配置。',
+  'DeepSeek request failed': 'AI 分析服务请求失败，系统将自动重试。',
+  'Analysis worker lease expired': '分析任务处理超时，请重新分析。',
+  'Unexpected worker error': '分析任务处理异常，系统将自动重试。',
+};
+
+function taskErrorMessage(task: RecordSummary['task'] | CollectionRecord['task']) {
+  if (!task?.error_message) {
+    return null;
+  }
+  return LEGACY_ERROR_MESSAGES[task.error_message] || task.error_message;
+}
+
+function taskNotice(task: RecordSummary['task'] | CollectionRecord['task']) {
+  return task?.error_code === 'no_speech_detected' ? taskErrorMessage(task) : null;
+}
+
+function taskLabel(task: RecordSummary['task'] | CollectionRecord['task']) {
+  if (taskNotice(task)) {
+    return '未识别到有效语音';
+  }
+  if (task?.status === 'failed' && task.failed_stage === 'transcription') {
+    return '转录失败';
+  }
+  return task ? STATUS_LABELS[task.status] : STATUS_LABELS.failed;
+}
+
 export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) {
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CollectionRecord | null>(null);
@@ -173,8 +204,8 @@ export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) 
           <Text style={styles.heading}>录音文件</Text>
           <Text style={styles.body}>转录和 AI 分析在后台任务中执行，处理中会自动刷新状态。</Text>
         </View>
-        <Pressable style={styles.refreshButton} disabled={loading} onPress={() => void loadRecords()}>
-          <Text style={styles.refreshButtonText}>{loading ? '刷新中' : '刷新'}</Text>
+        <Pressable style={({pressed}) => [styles.refreshButton, pressed && styles.pressed]} disabled={loading} onPress={() => void loadRecords()}>
+          {loading ? <Text style={styles.refreshButtonText}>刷新中</Text> : <View style={styles.refreshButtonContent}><Text style={styles.refreshIcon}>↻</Text><Text style={styles.refreshButtonText}>刷新</Text></View>}
         </Pressable>
       </View>
       {records.length === 0 && !loading ? (
@@ -194,18 +225,20 @@ export function RecordManagement({onStartNew, onNotice}: RecordManagementProps) 
 
 function RecordCard({record, onDetail, onRetry, onDelete}: {record: RecordSummary; onDetail: () => void; onRetry: () => void; onDelete: () => void}) {
   const status = record.task?.status ?? 'failed';
+  const hasNotice = Boolean(taskNotice(record.task));
   const canRetry = !record.task || !ACTIVE_STATUSES.includes(status);
-  const failureLabel = record.task?.failed_stage === 'transcription' ? '转录失败' : STATUS_LABELS[status];
+  const statusLabel = taskLabel(record.task);
   return (
     <View style={styles.recordCard}>
       <View style={styles.recordTopRow}>
-        <Text style={styles.recordTitle}>{record.subject_id}</Text>
-        <Text style={[styles.statusPill, status === 'failed' && styles.statusPillFailed, status === 'completed' && styles.statusPillCompleted]}>{failureLabel}</Text>
+        <View style={styles.recordTitleWrap}><View style={[styles.recordSignal, status === 'completed' && styles.recordSignalCompleted, status === 'failed' && styles.recordSignalFailed]} /><Text style={styles.recordTitle}>{record.subject_id}</Text></View>
+        <Text style={[styles.statusPill, status === 'failed' && styles.statusPillFailed, hasNotice && styles.statusPillWarning, status === 'completed' && !hasNotice && styles.statusPillCompleted]}>{statusLabel}</Text>
       </View>
       <Text style={styles.recordMeta}>{record.audio_filename} · {formatTime(record.created_at)}</Text>
-      {record.task?.status === 'failed' ? <Text style={styles.errorText}>{record.task.error_message || '任务处理失败，可查看详情后重新分析。'}</Text> : null}
+      {record.task?.status === 'failed' ? <Text style={styles.errorText}>{taskErrorMessage(record.task) || '任务处理失败，可查看详情后重新分析。'}</Text> : null}
+      {taskNotice(record.task) ? <Text style={styles.infoText}>{taskNotice(record.task)}</Text> : null}
       <View style={styles.actionRow}>
-        <ActionButton label="详情" onPress={onDetail} />
+        <ActionButton label="查看详情" onPress={onDetail} />
         {canRetry ? <ActionButton label="重新分析" onPress={onRetry} /> : null}
         <ActionButton label="删除" destructive onPress={onDelete} />
       </View>
@@ -220,8 +253,9 @@ function RecordDetail({record, onClose, onPlay, onStop, onRetry, onCancel, onDel
   return (
     <View style={styles.modalBackdrop}>
       <View style={styles.detailSheet}>
+        <View style={styles.sheetHandle} />
         <View style={styles.detailHeader}>
-          <Pressable style={styles.backButton} onPress={onClose}><Text style={styles.backButtonText}>‹ 返回</Text></Pressable>
+          <Pressable style={({pressed}) => [styles.backButton, pressed && styles.pressed]} onPress={onClose}><Text style={styles.backButtonText}>‹ 返回</Text></Pressable>
           <Text style={styles.detailTitle}>录音详情</Text>
           <View style={styles.headerSpacer} />
         </View>
@@ -229,7 +263,7 @@ function RecordDetail({record, onClose, onPlay, onStop, onRetry, onCancel, onDel
           <View style={styles.detailIdentity}>
             <Text style={styles.detailSubject}>{record.subject_id}</Text>
             <Text style={styles.detailText}>{formatTime(record.created_at)}</Text>
-            {task ? <Text style={styles.detailStatus}>{task.status === 'failed' && task.failed_stage === 'transcription' ? '转录失败' : STATUS_LABELS[task.status]}</Text> : null}
+            {task ? <Text style={styles.detailStatus}>{taskLabel(task)}</Text> : null}
           </View>
           <Text style={styles.detailText}>年龄段：{record.age_group || '未填写'}　性别：{record.gender || '未填写'}</Text>
           <Text style={styles.detailText}>语言：{record.language || '普通话'}　环境：{record.recording_environment || '未填写'}</Text>
@@ -237,7 +271,8 @@ function RecordDetail({record, onClose, onPlay, onStop, onRetry, onCancel, onDel
           <ActionButton label="停止播放" onPress={onStop} />
           {isActive ? <ActionButton label="取消当前分析" destructive onPress={onCancel} /> : null}
           {!isActive ? <ActionButton label="重新分析" onPress={onRetry} /> : null}
-          {task?.error_message ? <SectionBlock title="任务状态" value={`${task.failed_stage === 'transcription' ? '转录' : '分析'}失败：${task.error_message}`} /> : null}
+          {task?.status === 'failed' && taskErrorMessage(task) ? <SectionBlock title="任务状态" value={`${task.failed_stage === 'transcription' ? '转录' : '分析'}失败：${taskErrorMessage(task)}`} /> : null}
+          {taskNotice(task) ? <SectionBlock title="转录结果" value={taskNotice(task)!} /> : null}
           {record.transcript ? <SectionBlock title="真实转写" value={record.transcript} /> : null}
           {record.asr_result ? <SectionBlock title="ASR 依据" value={`录音时长：${formatDuration(record.asr_result.audio_duration)}\n句段数：${sentences.length}`} /> : null}
           {sentences.length > 0 ? <View style={styles.detailBlock}><Text style={styles.detailHeading}>句段时间线</Text>{sentences.map((sentence, index) => <Text key={`${sentence.start_time}-${index}`} style={styles.detailText}>{formatDuration(sentence.start_time)} - {formatDuration(sentence.end_time)}　{sentence.text}</Text>)}</View> : null}
@@ -270,13 +305,70 @@ function SectionBlock({title, value}: {title: string; value: string}) {
 }
 
 function PrimaryButton({label, disabled, onPress}: {label: string; disabled?: boolean; onPress: () => void}) {
-  return <Pressable disabled={disabled} style={[styles.button, disabled && styles.buttonDisabled]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text></Pressable>;
+  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text><Text style={styles.buttonArrow}>→</Text></Pressable>;
 }
 
 function ActionButton({label, destructive, onPress}: {label: string; destructive?: boolean; onPress: () => void}) {
-  return <Pressable style={[styles.actionButton, destructive && styles.actionButtonDestructive]} onPress={onPress}><Text style={[styles.actionButtonText, destructive && styles.actionButtonTextDestructive]}>{label}</Text></Pressable>;
+  return <Pressable style={({pressed}) => [styles.actionButton, destructive && styles.actionButtonDestructive, pressed && styles.pressed]} onPress={onPress}><Text style={[styles.actionButtonText, destructive && styles.actionButtonTextDestructive]}>{label}</Text></Pressable>;
 }
 
 const styles = StyleSheet.create({
-  section: {gap: 18}, titleRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16}, titleCopy: {flex: 1, gap: 5}, heading: {fontSize: 25, letterSpacing: -0.5, fontWeight: '800', color: '#163C36'}, body: {fontSize: 15, lineHeight: 22, color: '#52706A'}, refreshButton: {minHeight: 42, minWidth: 68, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#E1EEEA'}, refreshButtonText: {fontSize: 14, fontWeight: '700', color: '#1B6559'}, button: {minHeight: 50, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, backgroundColor: '#1B6559', borderRadius: 12}, buttonDisabled: {backgroundColor: '#9DB6B0'}, buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'}, emptyPanel: {padding: 24, borderRadius: 16, borderWidth: 1, borderColor: '#C8D8D2', borderStyle: 'dashed', backgroundColor: '#F7FBF9', gap: 8}, emptyTitle: {fontSize: 17, fontWeight: '800', color: '#163C36'}, empty: {fontSize: 15, lineHeight: 22, color: '#52706A'}, recordCard: {gap: 10, padding: 18, borderRadius: 16, borderLeftWidth: 4, borderLeftColor: '#6FA597', backgroundColor: '#FAFCFB'}, recordTopRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12}, recordTitle: {flex: 1, fontSize: 18, fontWeight: '800', color: '#163C36'}, statusPill: {paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#FFF3D9', fontSize: 12, color: '#8A5A12', fontWeight: '700'}, statusPillCompleted: {backgroundColor: '#E1EEEA', color: '#285C52'}, statusPillFailed: {backgroundColor: '#FBE7E5', color: '#A43F35'}, recordMeta: {fontSize: 14, color: '#52706A'}, errorText: {fontSize: 13, color: '#A43F35'}, actionRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4}, actionButton: {minHeight: 42, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#E1EEEA'}, actionButtonDestructive: {backgroundColor: '#FBE7E5'}, actionButtonText: {fontWeight: '700', color: '#1B6559'}, actionButtonTextDestructive: {color: '#A43F35'}, modalBackdrop: {flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(19, 51, 47, 0.36)'}, detailSheet: {maxHeight: '91%', paddingTop: 16, backgroundColor: '#FAFCFB', borderTopLeftRadius: 26, borderTopRightRadius: 26}, detailHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 58, paddingHorizontal: 28, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#E2ECE8'}, detailTitle: {fontSize: 17, fontWeight: '800', color: '#163C36'}, backButton: {minWidth: 72, paddingVertical: 11, marginLeft: -6}, backButtonText: {fontSize: 15, fontWeight: '700', color: '#1B6559'}, headerSpacer: {minWidth: 72}, detailContent: {gap: 18, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40}, detailIdentity: {gap: 6}, detailSubject: {fontSize: 21, fontWeight: '800', color: '#163C36'}, detailStatus: {fontSize: 14, color: '#285C52', fontWeight: '800'}, detailBlock: {gap: 8, paddingTop: 4}, detailHeading: {fontSize: 14, fontWeight: '800', color: '#285C52'}, detailText: {fontSize: 15, lineHeight: 23, color: '#46645E'}, analysisCard: {gap: 9, padding: 18, borderRadius: 14, backgroundColor: '#E8F0EE'}, analysisState: {fontSize: 21, fontWeight: '800', color: '#163C36'}, disclaimer: {fontSize: 13, lineHeight: 20, color: '#7A6652', padding: 14, backgroundColor: '#FFF8EC', borderRadius: 10}, dangerZone: {gap: 10, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0D9D5'}, dangerHint: {fontSize: 13, color: '#9B4B43'},
+  section: {gap: 18},
+  titleRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16},
+  titleCopy: {flex: 1, gap: 5},
+  heading: {fontSize: 29, letterSpacing: -0.9, fontWeight: '800', color: '#173A35'},
+  body: {fontSize: 15, lineHeight: 22, color: '#61736B'},
+  refreshButton: {minHeight: 42, minWidth: 80, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#E6F0E9'},
+  refreshButtonContent: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  refreshIcon: {fontSize: 18, lineHeight: 18, color: '#1D6258', fontWeight: '700', includeFontPadding: false},
+  refreshButtonText: {fontSize: 13, lineHeight: 18, fontWeight: '800', color: '#1D6258', includeFontPadding: false},
+  button: {minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 18, backgroundColor: '#D86B51', borderRadius: 16, shadowColor: '#A64734', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: {width: 0, height: 6}, elevation: 4},
+  buttonDisabled: {backgroundColor: '#B9C1BA', shadowOpacity: 0},
+  buttonPressed: {transform: [{scale: 0.985}]},
+  buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
+  buttonArrow: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
+  emptyPanel: {padding: 25, borderRadius: 20, borderWidth: 1, borderColor: '#D9DED5', borderStyle: 'dashed', backgroundColor: '#FFFCF6', gap: 8},
+  emptyTitle: {fontSize: 18, fontWeight: '800', color: '#173A35'},
+  empty: {fontSize: 15, lineHeight: 22, color: '#61736B'},
+  recordCard: {gap: 10, padding: 18, borderRadius: 20, borderWidth: 1, borderColor: '#E2E1D9', backgroundColor: '#FFFCF6', shadowColor: '#274B43', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: {width: 0, height: 4}, elevation: 2},
+  recordCardPressed: {opacity: 0.82, transform: [{scale: 0.99}]},
+  recordTopRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  recordTitleWrap: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9},
+  recordSignal: {width: 9, height: 9, borderRadius: 5, backgroundColor: '#E5A84E'},
+  recordSignalCompleted: {backgroundColor: '#4F9B7B'},
+  recordSignalFailed: {backgroundColor: '#D86B51'},
+  recordTitle: {flex: 1, fontSize: 18, fontWeight: '800', color: '#173A35'},
+  statusPill: {paddingHorizontal: 10, paddingVertical: 6, borderRadius: 99, backgroundColor: '#FFF1D4', fontSize: 12, color: '#95601C', fontWeight: '800'},
+  statusPillCompleted: {backgroundColor: '#E1F0E8', color: '#246A59'},
+  statusPillWarning: {backgroundColor: '#FFF1D4', color: '#95601C'},
+  statusPillFailed: {backgroundColor: '#FCE4DF', color: '#A54436'},
+  recordMeta: {fontSize: 13, color: '#71817A'},
+  errorText: {fontSize: 13, color: '#A54436'},
+  infoText: {fontSize: 13, lineHeight: 19, color: '#95601C'},
+  actionRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4},
+  actionButton: {minHeight: 38, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 13, borderRadius: 10, backgroundColor: '#E8F1EC'},
+  actionButtonDestructive: {backgroundColor: '#FCE8E3'},
+  actionButtonText: {fontSize: 13, fontWeight: '800', color: '#1D6258'},
+  actionButtonTextDestructive: {color: '#A54436'},
+  modalBackdrop: {flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(18, 45, 40, 0.48)'},
+  detailSheet: {maxHeight: '91%', paddingTop: 11, backgroundColor: '#FFFCF6', borderTopLeftRadius: 28, borderTopRightRadius: 28},
+  sheetHandle: {width: 42, height: 4, borderRadius: 4, alignSelf: 'center', backgroundColor: '#CDD6D0', marginBottom: 7},
+  detailHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 58, paddingHorizontal: 24, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#E6E4DC'},
+  detailTitle: {fontSize: 17, fontWeight: '800', color: '#173A35'},
+  backButton: {minWidth: 72, paddingVertical: 11, marginLeft: -6},
+  backButtonText: {fontSize: 15, fontWeight: '800', color: '#1D6258'},
+  headerSpacer: {minWidth: 72},
+  detailContent: {gap: 18, paddingHorizontal: 22, paddingTop: 23, paddingBottom: 40},
+  detailIdentity: {gap: 6},
+  detailSubject: {fontSize: 22, fontWeight: '800', color: '#173A35'},
+  detailStatus: {fontSize: 14, color: '#26705E', fontWeight: '800'},
+  detailBlock: {gap: 8, paddingTop: 4},
+  detailHeading: {fontSize: 13, letterSpacing: 0.4, fontWeight: '900', color: '#2C6D5F'},
+  detailText: {fontSize: 15, lineHeight: 23, color: '#50655D'},
+  analysisCard: {gap: 9, padding: 19, borderRadius: 18, borderWidth: 1, borderColor: '#CEE0D5', backgroundColor: '#EAF3EC'},
+  analysisState: {fontSize: 22, fontWeight: '800', color: '#173A35'},
+  disclaimer: {fontSize: 13, lineHeight: 20, color: '#7D6548', padding: 14, backgroundColor: '#FFF3DC', borderRadius: 12},
+  dangerZone: {gap: 10, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0D9D5'},
+  dangerHint: {fontSize: 13, color: '#A1574A'},
+  pressed: {opacity: 0.7},
 });
