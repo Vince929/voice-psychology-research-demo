@@ -74,7 +74,7 @@ jobs:
               exit 1
             fi
             DATABASE_URL_VALUE="${DATABASE_URL_VALUE/#mysql:\/\//mysql+pymysql://}"
-            DATABASE_URL_VALUE="${DATABASE_URL_VALUE/@127.0.0.1:3306\/@mysql-master:3306/}"
+            DATABASE_URL_VALUE="$(printf '%s' "$DATABASE_URL_VALUE" | sed -E 's#@(127\.0\.0\.1|mysql):3306/#@mysql-master:3306/#')"
             upsert_env "DATABASE_URL" "$DATABASE_URL_VALUE"
 
             export STARLOG_NETWORK="$(docker inspect --format '{{range $network, $_ := .NetworkSettings.Networks}}{{$network}}{{end}}' starlog-mysql-master)"
@@ -85,7 +85,7 @@ jobs:
             docker compose -f docker-compose.prod.yml build api worker
             echo "Using shared Starlog MySQL network: $STARLOG_NETWORK"
             echo "Creating the target schema if needed..."
-            docker compose -f docker-compose.prod.yml run --rm --no-deps api python -c "import os; import pymysql; from urllib.parse import urlparse; u = urlparse(os.environ['DATABASE_URL']); db = u.path.lstrip('/'); c = pymysql.connect(host=u.hostname, port=u.port or 3306, user=u.username, password=u.password, charset='utf8mb4'); q = c.cursor(); q.execute(f'CREATE DATABASE IF NOT EXISTS `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'); c.commit(); c.close(); print(f'Ensured schema: {db}')"
+            docker compose -f docker-compose.prod.yml run --rm --no-deps api python -c "import os; import pymysql; from urllib.parse import urlparse; u = urlparse(os.environ['DATABASE_URL']); db = u.path.lstrip('/'); assert db.replace('_', '').isalnum(); c = pymysql.connect(host=u.hostname, port=u.port or 3306, user=u.username, password=u.password, charset='utf8mb4'); q = c.cursor(); q.execute('CREATE DATABASE IF NOT EXISTS ' + db + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'); c.commit(); c.close(); print('Ensured schema: ' + db)"
             echo "Applying Yoyo database migrations..."
             docker compose -f docker-compose.prod.yml run --rm --no-deps api sh -ec '
               yoyo_database_url="$(printf "%s" "$DATABASE_URL" | sed "s#^mysql+pymysql:#mysql:#")"
