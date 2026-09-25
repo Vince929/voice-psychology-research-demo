@@ -3,4 +3,5 @@ plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'VoicePsychologyMobile'
 include ':app'
+project(':react-native-audio-recorder-player').projectDir = new File(rootProject.projectDir, '../../../node_modules/react-native-audio-recorder-player/android')
 includeBuild('../../../node_modules/@react-native/gradle-plugin')

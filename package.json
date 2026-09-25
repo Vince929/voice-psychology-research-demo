@@ -2,18 +2,15 @@
   "name": "voice-psychology-research-demo",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.16.1",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "mobile:start": "npm --workspace @voice-psychology/mobile run start",
-    "mobile:android": "npm --workspace @voice-psychology/mobile run android",
-    "mobile:android:usb": "npm --workspace @voice-psychology/mobile run android:usb",
+    "mobile:start": "pnpm --filter @voice-psychology/mobile run start",
+    "mobile:android": "pnpm --filter @voice-psychology/mobile run android",
+    "mobile:android:usb": "pnpm --filter @voice-psychology/mobile run android:usb",
     "api:dev": "cd apps/api && uvicorn app.main:app --reload"
-  },
-  "dependencies": {
-    "@babel/runtime": "7.25.0",
-    "react-native-nitro-modules": "0.29.2"
   }
 }

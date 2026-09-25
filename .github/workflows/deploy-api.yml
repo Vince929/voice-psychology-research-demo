@@ -61,6 +61,7 @@ jobs:
             upsert_env "AUDIO_COS_SECRET_ID" "${{ vars.AUDIO_COS_SECRET_ID }}"
             upsert_env "AUDIO_COS_SECRET_KEY" "${{ vars.AUDIO_COS_SECRET_KEY }}"
             upsert_env "AUDIO_COS_KEY_PREFIX" "${{ vars.AUDIO_COS_KEY_PREFIX }}"
+            upsert_env "TENCENTCLOUD_APP_ID" "${{ vars.TENCENTCLOUD_APP_ID }}"
             upsert_env "DEEPSEEK_API_KEY" "${{ vars.DEEPSEEK_API_KEY }}"
             upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
             upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
@@ -78,8 +79,15 @@ jobs:
               docker compose -f docker-compose.prod.yml logs mysql
               exit 1
             fi
-            docker compose -f docker-compose.prod.yml run --rm --no-deps api sh -c 'yoyo apply --batch --database "$(printf "%s" "$DATABASE_URL" | sed "s#^mysql+pymysql:#mysql:#")" db/migrations'
-            docker compose -f docker-compose.prod.yml up -d api
+            echo "Applying Yoyo database migrations..."
+            docker compose -f docker-compose.prod.yml run --rm --no-deps api sh -ec '
+              yoyo_database_url="$(printf "%s" "$DATABASE_URL" | sed "s#^mysql+pymysql:#mysql:#")"
+              yoyo apply --batch --database "$yoyo_database_url" db/migrations
+              echo "Yoyo migration status:"
+              yoyo list --database "$yoyo_database_url" db/migrations
+            '
+            echo "Yoyo database migrations completed"
+            docker compose -f docker-compose.prod.yml up -d api worker
 
       - name: Done
         run: echo "Voice Psychology API deployment completed"

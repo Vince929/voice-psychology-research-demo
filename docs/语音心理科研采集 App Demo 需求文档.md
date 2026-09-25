@@ -1,251 +1,343 @@
-# 语音心理科研采集 App Demo 需求文档
+# 语音表达洞察采集 App Demo：设计与技术方案
 
-用途：交付 AI 生成可本地运行完整 Demo，技术栈改为 React-Native（RN）+ Python FastAPI 后端；后端接入 DeepSeek API 做心理分析推理。开发阶段支持本地运行；Demo 后端可与现有 Vince 项目共用一台腾讯云服务器，以相同域名和不同端口对外提供服务。原型对标香港理工大学刘焱课题组「医疗语音交互系统」抑郁/人格语音采集子项目。
-⚠️两套模式：面试演示模式（默认，伦理合规）、开发者调试模式（本地把玩，调用DeepSeek做推理演示）。Demo为工程原型，非医疗产品，不能用于真实临床诊断。
- 
-一、项目来龙去脉
- 
-真实项目背景
- 
-香港理工大学 · 认知计算实验室（刘焱Yan Liu教授），医疗语音交互系统方向。
- 
-1. 科研痛点：传统心理学量表（PHQ‑9抑郁、MBTI人格）依靠用户主观答题，多次复测结果不稳定，存在刻意伪装、主观偏差。
-2. 科研方案：采集普通人日常说话语音，分析语音声学特征（语速、停顿、语调、能量等），在服务端训练AI模型做心理状态分析。
-3. 项目所处阶段：新项目，处于数据采集阶段，无公开Demo、无开源代码、未发表论文。
-4. 真实App定位：人体受试者科研采集工具
-- 客户端职责：收集知情同意、填写问卷、录制语音、上传音频+问卷元数据到后端。
-- 伦理硬性约束：正式版本客户端禁止输出任何AI心理预测结果；全部推理、特征提取放到实验室后端执行；受试者拥有随时删除本人全部数据的权利。
-5. 类比参考：工程范式和美团具身智能数采平台高度一致；区别：具身智能采集视频/点云，本项目采集人声语音音频。
- 
-Demo定位说明
- 
-1. RN移动端只负责采集交互，所有AI推理全部放在FastAPI后端，客户端不跑大模型；
-2. 后端本地调用DeepSeek开放API；音频、问卷数据后端本地持久化；
-3. 提供调试开关：开启后，后端调用DeepSeek，返回模拟心理分析结果给到前端展示；面试演示关闭开关，不调用大模型，对齐正式科研产品形态；
-4. 整套系统本地部署，RN模拟器 + FastAPI本地服务，不需要公网服务器。
- 
-二、完整技术栈
- 
-移动端（React‑Native RN）
- 
-- React‑Native + TypeScript
-- 录音库： react‑native‑audio‑recorder‑player ，录制AAC音频
-- 本地存储： AsyncStorage  缓存状态；音频文件保存在手机模拟器沙盒目录
-- 网络：axios 请求本地FastAPI后端  http://127.0.0.1:8000 
-- UI：可使用react‑native基础组件，不需要复杂UI库
- 
-后端（Python FastAPI）
- 
-- FastAPI 提供http接口
-- 数据库：MySQL，使用 SQLAlchemy ORM，保存受试者信息、问卷作答、音频文件路径、推理结果
-- 文件存储：上传的 AAC 音频保存在后端本地 `./upload_audio` 文件夹；腾讯云部署时该目录应位于受控的持久化磁盘路径
-- AI能力：调用 DeepSeek HTTP API，需要读取环境变量 `DEEPSEEK_API_KEY`，密钥写环境变量，禁止硬编码到代码
-- 依赖：`fastapi`、`uvicorn`、`sqlalchemy`、`pymysql`、`python-dotenv`、`requests`、`pydantic`
- 
-⚠️重要：DeepSeek仅后端调用，RN前端完全不直接访问大模型接口。
+> 用途：后天面试演示的 React Native + FastAPI 工程 Demo。用户录制一段普通话音频，服务端持久化原音频，并通过腾讯云 ASR 获取真实转写，再调用 DeepSeek 生成非医疗的实验性表达洞察。
+>
+> 本项目是工程演示，不是医疗器械、心理咨询服务或人格测评工具；所有结果均为实验性预测，仅供演示与自我观察。
 
-### 腾讯云部署与 MySQL 方案（已定）
+## 目录
 
-本 Demo 与 Vince 后端共用同一台腾讯云服务器和同一个域名，并采用相同的 Docker Compose + GitHub Actions SSH 发布方式。两个后端服务使用不同的内部监听端口，客户端通过相同域名加不同 HTTPS 端口访问；本 Demo 在独立 Docker Compose 网络内运行专属 MySQL 容器、数据库和账号，不复用 Vince 的业务库或账号。
+- 1. 摘要与关键结论
+  - 1.1 关键决策
+  - 1.2 端到端架构
+- 2. 背景、目标与范围
+- 3. 产品体验与页面设计
+- 4. 系统架构与任务状态机
+- 5. 音频、转写与 AI 分析设计
+- 6. API、数据模型与幂等规则
+- 7. 异步可靠性设计
+- 8. 部署、配置与安全边界
+- 9. 实施范围与验收清单
+- 10. 风险与待确认项
 
-| 项目 | 部署决策 | 说明与边界 |
+## 1. 摘要与关键结论
+
+本期将原有“问卷优先的科研采集”流程调整为“录音采集与异步表达洞察”流程。核心展示价值不在于把通用大模型包装为心理诊断，而在于完成可靠的移动端录音、云端真实转写、持久化异步任务、真实 AI 分析、任务状态展示和失败恢复闭环。
+
+用户录制的 Android 原始音频为 M4A 容器中的 AAC。腾讯云录音文件识别极速版支持 `m4a` 与 `aac`，因此本期服务端直接传递原音频字节给 ASR，不新增音频合并或 `ffmpeg` 转码链路。ASR 接口同步返回，但仅由独立 Worker 调用；移动端始终通过任务状态轮询获取进度。
+
+### 1.1 关键决策
+
+| 维度 | 已定方案 | 影响与边界 |
 | --- | --- | --- |
-| 对外地址 | `https://<同一域名>:8443` | 与 Vince 使用相同域名，但使用本 Demo 专属端口；实际端口可调整，需同步更新 RN 的生产环境 API 地址。 |
-| FastAPI 服务 | `127.0.0.1:8082` | 仅监听本机回环地址，由 Nginx 转发；不直接暴露 FastAPI 端口到公网。 |
-| 反向代理与 TLS | Nginx 监听 `8443` 并转发至 `127.0.0.1:8082` | 同一域名的 HTTPS 证书可用于不同端口；`8443` 需在腾讯云安全组和服务器防火墙中按需放行。 |
-| 数据库 | 专属 MySQL 8 容器，库名 `voice_psychology_demo` | 使用账号 `voice_demo_app`；容器仅供本 Demo 的 FastAPI 使用。 |
-| MySQL 网络边界 | 仅绑定宿主机 `127.0.0.1:3308` | 容器网络内使用 `mysql:3306`；不开放 MySQL 到公网，也不占用 Vince 的 `3306` 映射。 |
-| 音频文件 | 宿主机持久化目录 `data/upload_audio/` | 挂载到 API 容器内 `/app/upload_audio`，容器更新不会清理音频；目录权限、备份、访问日志和删除流程需独立管理。 |
-| 自动部署 | GitHub Actions 经 SSH 更新服务器 | 推送 `master` 分支且后端或部署配置变更时，服务器拉取代码并执行 `docker compose -f docker-compose.prod.yml up -d --build`。 |
+| 核心用户流程 | 知情同意 → 匿名基础信息 → 录音 → 上传 → 录音列表/详情查看分析 | 移除 PHQ-9 与 MBTI；首版不要求姓名或手机号。 |
+| 音频格式 | Android `MediaRecorder` 输出 M4A/AAC，44.1 kHz | 腾讯云极速 ASR 支持 M4A；不在本期引入转码。 |
+| 转写 | Worker 通过 HTTPS 调用腾讯云录音文件识别极速版，使用 `16k_zh` 与 `voice_format=m4a` | 使用服务端 `AppID`、`SecretId`、`SecretKey`；密钥绝不下发 RN。 |
+| AI 分析 | Worker 将真实转写和已知音频指标传给 DeepSeek | 输出表达状态、活力指数、紧张度指数、依据与非医疗建议；禁止疾病、风险、人格标签。 |
+| 异步架构 | MySQL 持久化 `analysis_task`，独立 Worker 轮询领取任务 | API 与耗时 ASR/LLM 解耦；任务可重试、取消和恢复。 |
+| 上传可靠性 | 本期使用单段原始 M4A 上传 + 客户端幂等键 | 不做录制中的自动分片；长音频分片为后续扩展。 |
+| App 状态展示 | 列表轮询 2～3 秒：待转录、转录中、AI 分析中、完成、失败、已取消 | 仅有运行中任务时轮询；终态后停止。 |
+| 隐私与基础信息 | 匿名 ID、年龄段、可选性别、语言/方言、录音环境 | 年龄和性别只用于存档、质量解释和后续研究分组，不作为 LLM 情绪判断输入。 |
+
+### 1.2 端到端架构
 
 ```mermaid
 flowchart LR
-    A[RN App] -->|HTTPS 同域名:8443| B[Nginx]
-    B -->|127.0.0.1:8082| C[语音采集 FastAPI]
-    C --> D[(MySQL 容器<br/>voice_psychology_demo)]
-    C --> E[腾讯云 COS<br/>voice-psychology/audio]
-    F[Vince 后端] --> G[(Vince 独立 MySQL)]
+    A[RN App<br/>录制 M4A/AAC] --> B[FastAPI<br/>幂等接收与 COS 存储]
+    B --> C[(MySQL<br/>采集记录与任务)]
+    C --> D[Worker<br/>领取待处理任务]
+    D --> E[腾讯云 ASR<br/>真实转写]
+    E --> F[DeepSeek<br/>实验性表达洞察]
+    F --> C
+    C --> G[RN 录音列表<br/>轮询任务状态]
 ```
 
-部署环境通过 `.env` 或部署平台密钥配置提供以下变量，不得提交真实值：
+## 2. 背景、目标与范围
 
-```dotenv
-DATABASE_URL=mysql+pymysql://voice_demo_app:<URL编码后的密码>@mysql:3306/voice_psychology_demo?charset=utf8mb4
-AUDIO_COS_BUCKET=<COS桶名称>
-AUDIO_COS_REGION=ap-shanghai
-AUDIO_COS_SECRET_ID=<COS SecretId>
-AUDIO_COS_SECRET_KEY=<COS SecretKey>
-AUDIO_COS_KEY_PREFIX=voice-psychology
+### 2.1 背景
+
+当前工程已有 React Native 录音能力、FastAPI 服务、MySQL、腾讯云 COS 音频存储和记录管理页面。Android 原生模块使用 `MediaRecorder.OutputFormat.MPEG_4` 与 `MediaRecorder.AudioEncoder.AAC`，生成 `.m4a` 文件。
+
+腾讯云录音文件识别极速版以 HTTPS POST 上传音频原始字节并同步返回 JSON。已确认其支持中文普通话、M4A/AAC 格式、100 MB 以内且不超过 2 小时的录音；本 Demo 的短朗读音频满足此边界。
+
+### 2.2 本期目标
+
+1. 用户可在 App 中完成知情同意、匿名基础信息填写与普通话录音。
+2. 上传一段 M4A 原音频后，用户能立即在列表看到该记录及转录/分析进度。
+3. Worker 使用真实腾讯云 ASR 返回转写及句段时间信息，再使用真实 DeepSeek 生成结构化表达洞察。
+4. 用户可查看转写、ASR 依据、AI 分析结果，可对失败任务重新分析、对记录或匿名受试者数据执行删除。
+5. 实现可讲解且可观察的任务队列、并发控制、幂等、超时、自动重试、取消和失败恢复机制。
+
+### 2.3 非目标
+
+- 不提供心理疾病诊断、抑郁/焦虑风险预测、治疗建议或人格标签。
+- 不展示 MBTI、PHQ-9 或任何医学量表分数。
+- 不做录音中的实时字幕、实时 TTS、唤醒词、知识库搜索或会议纪要。
+- 不在本期实现客户端录制中自动分片、断点续传和跨启动补传。
+- 不将年龄、性别等人口属性传给 DeepSeek 作为情绪判断依据。
+
+## 3. 产品体验与页面设计
+
+### 3.1 采集主流程
+
+```text
+知情同意
+→ 匿名基础信息
+→ 朗读提示与录音
+→ 提交并进入录音文件列表
+→ 查看转录/分析进度
+→ 查看详情、重试或删除
 ```
 
-GitHub 仓库中不提交 `apps/api/.env`，实际值由部署工作流同步到服务器。工作流沿用 Vince 的 SSH Secrets：`SERVER_HOST`、`SERVER_USER`、`SERVER_SSH_KEY`；实际的 MySQL、COS 与 DeepSeek 配置通过 GitHub Actions 环境变量注入。本期不要求把 MySQL、COS 音频对象或 DeepSeek Key 暴露到公网；正式采集前仍需确认服务器容量、备份与恢复策略、访问控制及科研伦理/数据合规要求。
+### 3.2 页面需求
 
-当前版本不实现 DeepSeek 调用或向客户端返回任何心理分析结果；录音与问卷仅用于科研采集和受控存储。未来如需要接入分析能力，应通过明确的独立需求实现，不能以运行时开关改变当前采集流程。
- 
-三、完整业务流转
- 
-plaintext
-  
+| 页面 | 主要内容 | 用户动作与规则 |
+| --- | --- | --- |
+| 知情同意 | 工程演示和非医疗声明、数据删除权说明 | 未勾选同意时不能进入采集。 |
+| 匿名基础信息 | 自动生成/可编辑匿名 ID、年龄段、可选性别、语言/方言、录音环境 | 不收姓名、手机号；首版固定/默认普通话。 |
+| 录音 | 朗读文本、麦克风权限、开始/停止录音、提交按钮 | 仅允许提交已停止的 M4A 录音。 |
+| 录音文件列表 | 录音编号、创建时间、时长、状态标签、失败次数和操作入口 | 有非终态任务时每 2～3 秒请求一次列表；终态时停止轮询。 |
+| 录音详情 | 原音频播放、真实转写、句段时间线、ASR 语速/时长、AI 洞察与免责声明 | 失败任务显示失败阶段、可重试；处理中任务可取消。 |
 
-RN App启动
-→ Page1：伦理知情同意页（必须勾选同意，否则无法进入）
-→ Page2：匿名受试者信息录入
-→ Page3：PHQ‑9抑郁量表问卷
-→ Page4：简化MBTI问卷
-→ Page5：语音录音采集页面（核心页面）
-→ RN：录音结束，AAC音频文件 + 问卷全部数据，multipart/form‑data POST上传到本地FastAPI后端
-→ FastAPI：将音频上传到腾讯云 COS，问卷/元数据及 COS 对象 Key 写入 MySQL 数据库
-→ RN跳转 Page6：记录列表页
-→ RN可请求后端接口：查看记录、播放 COS 音频流、查看问卷；支持删除单条/受试者全部数据
- 
- 
-五、RN移动端页面需求
- 
-Page1 伦理知情同意页面
- 
-1. 展示精简版高校人体受试者科研知情同意文本；
-2. 复选框： 我已经阅读并同意本科研采集协议 ；
-3. 按钮【进入实验】：未勾选置灰不可点击；不同意停留在本页面。
- 
-Page2 受试者信息录入页
- 
-匿名采集，不收集姓名手机号
- 
-- 匿名受试者编号（自动生成uuid或手动输入）
-- 选择：年龄段、性别
-- 点击下一步，数据暂存，下一步填写问卷。
- 
-Page3 PHQ‑9抑郁量表页面
- 
-1. PHQ‑9完整9道题，每题0‑4单选；
-2. 本地计算问卷原始总分，界面展示问卷原始得分（仅问卷结果，非AI预测）。
- 
-Page4 简化MBTI问卷页面
- 
-1. 少量MBTI经典二选一题目；
-2. 保存全部选项，仅展示维度计数，不输出人格标签。
- 
-Page5 语音录音核心页面（Demo重点）
- 
-1. 展示朗读提示文本，模拟科研采集任务；
-2. 请求麦克风权限；权限拒绝提示用户；
-3. 按钮：开始录音 / 停止录音；输出AAC压缩音频；
-4. 模拟器模拟后台录音逻辑。
- 
-代码注释（RN侧）
- 
-ts
-  
+### 3.3 状态文案
 
-// ==========生产环境工程痛点==========
-// iOS生产需要配置Audio Background Mode；AppStore审核限制无限后台录音
-// Android各厂商ROM电池策略会杀死后台录音进程，来电打断录音需要异常处理
-// Demo上传音频到本地FastAPI服务；真实项目需要分片、断点续传上传科研服务器
-// 伦理约束：正式客户端绝不运行AI推理；全部推理交给后端服务
- 
- 
-5. 录音完成：将音频文件 + 受试者信息 + PHQ9 + MBTI全部作答，multipart表单提交POST到FastAPI上传接口。
- 
-Page6 记录管理列表页
- 
-1. 列表展示后端返回记录：受试者编号、采集时间、PHQ‑9问卷原始得分；
-2. 每条记录操作：
-- 查看完整问卷作答；
-- 请求后端音频流，在RN播放录音；
-- 删除单条记录（调用后端接口，同时删除磁盘音频文件 + 数据库记录）；
-3. 伦理功能按钮：一键删除该受试者全部问卷+全部音频文件
- 
-注释： // 伦理审查硬性需求：受试者可随时销毁本人全部实验数据 
- 
-详情页不展示任何 AI 心理分析面板或预测结果。
- 
-六、FastAPI后端接口清单
- 
-本地开发环境使用 `http://127.0.0.1:8000`，提供接口文档 `/docs`；腾讯云生产环境使用 `https://<同一域名>:8443`，由 Nginx 转发到 FastAPI 内部端口。
- 
-1.  POST /api/submit_record 
-multipart/form‑data：音频文件、受试者json信息、phq9问卷、mbti问卷
- 
-- 上传音频到腾讯云 COS，将 COS 对象 Key 与问卷写入 MySQL；
-- 不调用 DeepSeek，不生成或返回心理分析结果；
-- 返回记录 ID。
+| API 任务状态 | App 主文案 | 说明 |
+| --- | --- | --- |
+| `pending` | 待转录 | 已持久化，等待 Worker 领取。 |
+| `transcribing` | 转录中 | Worker 正在向腾讯云 ASR 请求真实转写。 |
+| `analyzing` | AI 分析中 | ASR 已成功，正在调用 DeepSeek。 |
+| `completed` | 分析完成 | 转写、依据和分析结果可查看。 |
+| `failed` | 转录失败 / 分析失败 | 根据 `failed_stage` 区分；显示重试入口。 |
+| `cancelled` | 已取消 | 用户取消后 Worker 不再处理。 |
 
- 
-2.  GET /api/records  获取全部采集记录列表
-3.  GET /api/record/{record_id}  获取单条记录详情（问卷、推理结果）
-4.  GET /api/audio/{record_id}  返回音频文件流，供RN播放
-5.  DELETE /api/record/{record_id}  删除单条记录+对应音频文件
-6.  DELETE /api/subject/{subject_id}  删除某个受试者全部记录与音频（伦理接口）
- 
-后端重要约束
- 
-1. 当前版本不发起任何 DeepSeek 网络请求，也不提供 AI 心理分析结果；
-2. 数据库通过 `DATABASE_URL` 连接 MySQL；生产环境使用独立的 `voice_psychology_demo` 数据库及最小权限账号，禁止将 MySQL `3306` 端口暴露到公网；
-3. 音频必须通过受控的 COS 配置上传、读取和删除；
-4. 所有异常捕获，返回友好错误给前端。
- 
-七、项目README.md
- 
-markdown
-  
+详情页固定展示免责声明：**“实验性预测，仅供演示与自我观察，不构成医疗、心理诊断或人格测评。”**
 
-# RN+FastAPI 语音心理科研采集 Demo
->原型演示项目，模拟高校医疗语音科研受试者采集系统，**仅工程演示，不是医疗产品，不可用于真实诊断**。
+## 4. 系统架构与任务状态机
 
-## 技术栈
-- 移动端：React‑Native + TS；音频录制 react‑native‑audio‑recorder‑player
-- 后端：Python FastAPI + SQLAlchemy + MySQL
-- AI推理：后端调用 DeepSeek API；**前端不直接访问大模型**
+### 4.1 服务职责
 
-## 环境准备
-1. 后端
-复制`.env.example`为`.env`，填入你的 `DEEPSEEK_API_KEY=sk‑xxx`
-```bash
-pip install -r requirements.txt
-# .env 中配置 DATABASE_URL 和 DEEPSEEK_API_KEY
-uvicorn main:app --reload
-# 接口文档访问 http://127.0.0.1:8000/docs
- 
- 
-2. React‑Native端
- 
-bash
-  
+| 组件 | 职责 | 不负责 |
+| --- | --- | --- |
+| RN App | 录音、匿名信息、上传、任务状态轮询、结果/删除交互 | 不持有腾讯云或 DeepSeek 密钥；不直接调用外部 AI。 |
+| FastAPI | 校验上传、通过 COS 保存原音频、写入记录和任务、提供查询/重试/取消/删除接口 | 不在请求线程执行 ASR 或 LLM。 |
+| MySQL | 保存记录、任务状态、重试计数、转写、分析结果和错误摘要 | 不保存明文密钥。 |
+| Worker | 原子领取任务、调用 ASR/DeepSeek、写回终态、处理超时和退避 | 不开放公网 HTTP 服务。 |
+| 腾讯云 COS | 保存原始 M4A 音频对象 | 不作为客户端直传入口。 |
+| 腾讯云 ASR | 从原始 M4A 字节生成真实普通话转写及句段信息 | 不产生心理结论。 |
+| DeepSeek | 将转写与允许的客观指标转为受约束的结构化表达洞察 | 不处理原始音频，也不做临床诊断。 |
 
-npm install
-npx react‑native run‑android 或 run‑ios模拟器
-# 修改axios后端地址指向本机 127.0.0.1:8000
- 
- 
-⚠️安卓模拟器访问本机后端用  10.0.2.2:8000 
- 
-业务流程
- 
-知情同意 → 匿名受试者信息 → PHQ‑9问卷 → MBTI问卷 → 录音采集 → 上传音频&问卷到FastAPI后端 → 记录管理查看/播放/删除。
- 
-心理分析说明
+### 4.2 任务状态机
 
-当前版本只完成问卷与录音的科研采集、存储、播放和伦理删除闭环；不调用 DeepSeek，也不向客户端输出心理预测或人格标签。
- 
-Demo与真实科研项目差异
- 
-1. 真实项目：会提取语音声学特征送入自研模型，而不是直接丢问卷给通用大模型；
-2. 真实项目：需要音频分片断点续传、受控的远端科研存储和完整高校伦理审查；本 Demo 当前可本地运行，也可部署到腾讯云服务器；
-3. 真实项目：AI推理运行后端，但不会在客户端向受试者展示心理预测结果；
-4. DeepSeek调用仅Demo演示闭环，正式科研版本该逻辑移除，替换为实验室自研AI模型。
- 
-plaintext
-  
+```mermaid
+stateDiagram-v2
+    [*] --> pending: 创建采集记录
+    pending --> transcribing: Worker 原子领取
+    transcribing --> analyzing: ASR 成功
+    analyzing --> completed: DeepSeek 成功
+    transcribing --> failed: ASR 超时或错误
+    analyzing --> failed: DeepSeek 超时或错误
+    failed --> pending: 用户重试且未超过策略限制
+    pending --> cancelled: 用户取消
+    transcribing --> cancelled: Worker 写结果前检查取消标记
+    failed --> [*]
+    completed --> [*]
+    cancelled --> [*]
+```
 
+### 4.3 Worker 领取规则
 
-## 八、面试配套口述脚本
->这个Demo采用React‑Native + FastAPI架构，模仿课题组医疗语音采集项目完整链路。
->移动端只负责采集知情同意、心理问卷和麦克风录音，把音频和问卷全部上传到本地FastAPI后端。所有AI推理全部放在后端执行，前端不调用任何大模型。
->后端当前只存储采集数据，不调用 DeepSeek，客户端不展示心理预测；这与科研采集阶段的伦理边界一致。
->项目复现了移动端录音权限、音频上传、后端持久化存储，还有伦理要求的受试者一键删除全部数据。真实项目会把通用大模型替换为语音声学特征训练出来的自研模型。
+Worker 以事务方式领取一条到期的 `pending` 任务：更新状态为 `transcribing`、记录 `worker_id`、`started_at` 和租约截止时间。应使用 MySQL 行锁或等价的条件更新，保证多个 Worker 不会处理同一条任务。
 
-## 九、强制约束（给AI生成代码）
-1. 当前版本不应发起向 DeepSeek 的网络请求，也不应向客户端返回心理预测；
-2. Demo 不做语音信号特征提取；真实科研需要通过声学特征与经验证模型完成后续研究分析；
-3. 删除接口必须同时清理数据库记录与对应 COS 音频对象；
-4. 安卓模拟器访问本机后端注意使用特殊 IP `10.0.2.2`，代码中做注释提示。
+Worker 处理前和外部调用返回后都检查取消标记。超出租约的 `transcribing`/`analyzing` 任务由后续 Worker 重新入队或标记失败，避免进程异常造成永久卡死。
+
+## 5. 音频、转写与 AI 分析设计
+
+### 5.1 音频与腾讯云 ASR
+
+本期直接提交原始 `.m4a` 文件，无需解码、合并或转码。Worker 从 COS 流式读取音频字节，并按腾讯云极速 ASR 文档构造请求：
+
+| 参数 | 本期值 | 原因 |
+| --- | --- | --- |
+| Endpoint | `https://asr.cloud.tencent.com/asr/flash/v1/{appid}` | 极速录音文件识别的 HTTPS 接口。 |
+| `engine_type` | `16k_zh` | 首版普通话朗读场景。 |
+| `voice_format` | `m4a` | 与 Android 原始输出一致。 |
+| `word_info` | `3` | 获取带时间信息的句段/词信息及可用语速字段。 |
+| `first_channel_only` | `1` | 单人录音，避免多声道额外计费。 |
+| `speaker_diarization` | `0` | 单人朗读，无需说话人分离。 |
+| `filter_modal` | `0` | 保留真实语气词，避免改变采集内容。 |
+| `filter_punc` | `0` | 保留标点，方便阅读转写。 |
+
+签名由 Worker 使用标准库生成：将所有请求参数按字典序拼成 `POST + host + path?query`，使用 `SecretKey` 做 HMAC-SHA1 后 Base64 编码，置于 `Authorization` Header。请求体为音频原始字节，`Content-Type` 为 `application/octet-stream`。
+
+### 5.2 可展示的真实依据
+
+优先展示 ASR 响应的真实数据，而不为面试额外加入复杂声学库：
+
+- `audio_duration`：总时长；
+- `flash_result[].text`：完整转写；
+- `sentence_list[]`：句段文本、开始/结束时间；
+- 在响应实际返回时展示句段 `speech_speed` 与 `emotional_energy` 原始值；缺失时不虚构展示；
+- 由句段相邻时间间隔计算停顿数量/时长时，详情页要标明是“基于 ASR 句段时间计算”。
+
+### 5.3 DeepSeek 输入与输出
+
+DeepSeek 输入仅包含：转写文本、音频时长、ASR 句段时间/语速等客观数据，以及明确的安全提示词。它**不接收**姓名、年龄段、性别、录音环境等基础信息。
+
+期望模型返回可解析 JSON：
+
+```json
+{
+  "expression_state": "平稳专注",
+  "vitality_score": 68,
+  "tension_score": 32,
+  "evidence": [
+    "转写内容表达连贯",
+    "ASR 句段之间存在少量自然停顿"
+  ],
+  "summary": "本段表达整体较平稳，语句组织连贯。",
+  "suggestion": "如用于自我观察，可在不同时间重复录制并对比表达变化。",
+  "disclaimer": "实验性预测，仅供演示与自我观察，不构成医疗、心理诊断或人格测评。"
+}
+```
+
+Worker 必须校验 JSON 字段和分数范围；无法解析或输出包含疾病、风险、人格标签时，将本次调用视为失败或使用安全的固定拒答提示，不把不合规内容写入用户结果页。
+
+## 6. API、数据模型与幂等规则
+
+### 6.1 API 草案
+
+| 方法与路径 | 请求 | 响应 | 规则 |
+| --- | --- | --- | --- |
+| `POST /api/records` | multipart：`audio`、`subject`、`idempotency_key` | `record_id`、`task_id`、`task_status` | 上传原 M4A、写 COS/DB、创建 `pending` 任务；相同幂等键返回原结果。 |
+| `GET /api/records` | 无 | 录音列表和当前任务摘要 | 供列表及轮询使用。 |
+| `GET /api/records/{record_id}` | 无 | 完整记录、任务、转写、分析结果 | 不返回密钥和 COS 私有地址。 |
+| `GET /api/records/{record_id}/audio` | 无 | 原音频流 | 仅经 API 服务读取 COS。 |
+| `POST /api/records/{record_id}/analysis/retry` | 无 | 新/重置后的 `task_id`、状态 | 仅允许失败任务；复用原音频。 |
+| `POST /api/records/{record_id}/analysis/cancel` | 无 | `cancelled` 状态 | 仅允许待处理或处理中任务。 |
+| `DELETE /api/records/{record_id}` | 无 | 删除结果 | 删除任务、DB 记录和 COS 原音频。 |
+| `DELETE /api/subjects/{subject_id}` | 无 | `deleted_count` | 删除该匿名 ID 下全部任务、记录和音频。 |
+
+### 6.2 采集记录字段
+
+`collection_records` 建议保留或新增以下字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 记录主键。 |
+| `subject_id` | 匿名受试者编号。 |
+| `age_group`、`gender` | 可选基础信息，仅用于存档/分组。 |
+| `language`、`recording_environment` | ASR 选择与质量解释信息；首版语言为普通话。 |
+| `audio_path`、`audio_filename`、`audio_content_type` | COS 对象 Key 和原始文件元信息。 |
+| `idempotency_key` | 客户端创建的唯一键；数据库唯一约束。 |
+| `transcript`、`asr_result` | 真实转写和经裁剪的 ASR 响应。 |
+| `analysis_result` | 通过校验的结构化 DeepSeek 结果。 |
+| `created_at`、`updated_at` | 记录时间。 |
+
+旧的 `phq9_answers`、`mbti_answers` 字段及对应 App 页面在本期移除。Demo 开发数据库可重置，不要求迁移旧记录。
+
+### 6.3 分析任务字段
+
+`analysis_tasks` 为每条记录当前分析过程提供独立生命周期：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id`、`record_id` | 任务主键与所属采集记录。 |
+| `status` | `pending`、`transcribing`、`analyzing`、`completed`、`failed`、`cancelled`。 |
+| `attempt_count`、`max_attempts`、`next_retry_at` | 自动重试与指数退避依据。 |
+| `worker_id`、`lease_expires_at`、`started_at`、`finished_at` | 领取、崩溃恢复和排障依据。 |
+| `failed_stage`、`error_code`、`error_message` | 对 App 显示经过脱敏的错误摘要。 |
+| `asr_request_id`、`deepseek_request_id` | 外部服务排障追踪；仅保存允许的请求标识。 |
+| `cancel_requested_at` | 取消意图，供 Worker 在边界检查。 |
+
+### 6.4 幂等性
+
+App 在点击提交前生成 UUID 格式 `idempotency_key`，并使用 AsyncStorage 保存上传结果。后端为 `collection_records.idempotency_key` 建唯一约束：网络超时或重复点击后的同键请求不重复上传 COS、不重复创建记录、不重复创建任务，而是返回既有记录和任务摘要。
+
+“重新分析”不重新上传文件。接口先检查当前任务为 `failed`，再在事务内重置任务状态和重试字段或创建新的任务版本；同一记录同一时刻只允许一个非终态任务。
+
+## 7. 异步可靠性设计
+
+### 7.1 重试与超时
+
+- ASR 和 DeepSeek 均设显式 HTTP connect/read timeout，具体秒数应在实际联调后配置，不在本文承诺未验证的时延。
+- 可重试错误包括网络超时、连接错误、外部服务 5xx 和明确的限流错误；签名错误、凭证错误、音频格式不支持和模型结果不合规则不应盲目重试。
+- 每个任务最多自动尝试 3 次，使用指数退避；达到上限后写入 `failed`。
+- App 对 `failed` 提供“重新分析”，用户可在修复配置或网络后复用原音频发起新的处理。
+
+### 7.2 取消与删除
+
+取消只作用于未完成任务。API 写入取消标记；Worker 在开始外部调用前和返回后检查该标记，取消后不得继续写入分析结果。
+
+删除操作优先取消/删除关联任务，再删除 COS 音频对象与数据库采集记录。发生部分失败时应记录可排查错误并返回失败，不向用户伪称数据已经完全删除。
+
+### 7.3 轮询策略
+
+录音列表在存在 `pending`、`transcribing` 或 `analyzing` 任务时，每 2～3 秒获取一次 `GET /api/records`；所有任务进入 `completed`、`failed` 或 `cancelled` 后清理轮询计时器。离开列表页、组件卸载和网络异常时也必须清理计时器，避免重复请求。
+
+## 8. 部署、配置与安全边界
+
+### 8.1 Compose 拓扑
+
+生产 Compose 在已有 `api` 与 `mysql` 之外增加 `worker` 服务。`worker` 与 `api` 复用同一 Docker 镜像、应用代码、环境变量和 MySQL；不同点仅是启动命令，例如 `python -m app.worker`。Worker 不映射公网端口。
+
+```mermaid
+flowchart TB
+    N[Nginx 或面试本地访问] --> A[api 容器]
+    A --> M[(mysql 容器)]
+    A --> O[COS]
+    W[worker 容器] --> M
+    W --> O
+    W --> T[腾讯云 ASR]
+    W --> D[DeepSeek]
+```
+
+### 8.2 环境变量
+
+| 变量 | 用途 | 备注 |
+| --- | --- | --- |
+| `DATABASE_URL` | API/Worker 访问独立 MySQL | 不提交真实密码。 |
+| `AUDIO_COS_BUCKET`、`AUDIO_COS_REGION` | COS 定位 | 沿用当前音频存储配置。 |
+| `AUDIO_COS_SECRET_ID`、`AUDIO_COS_SECRET_KEY` | COS 与 ASR 服务端凭证 | 复用现有腾讯云密钥前需确认最小权限与 ASR 开通状态。 |
+| `TENCENTCLOUD_APP_ID` | 腾讯云极速 ASR URL 路径与签名参数 | 需从腾讯云 API 密钥管理页获取。 |
+| `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL` | DeepSeek 调用 | 仅 Worker 使用，API 不向客户端透传。 |
+| `WORKER_CONCURRENCY`、`TASK_MAX_ATTEMPTS` | Worker 并发和重试上限 | 首次以保守配置联调，实际数值待验证。 |
+
+### 8.3 安全与合规边界
+
+- RN 不直接访问腾讯云 ASR、COS 管理接口或 DeepSeek。
+- 音频和转写均可能属于敏感个人数据；日志中不得打印音频内容、完整转写、SecretKey 或 DeepSeek Key。
+- 结果页、DeepSeek 提示词和 API 文案均使用非诊断表述。
+- 受试者删除入口必须同时覆盖记录、任务和关联音频；实际部署前需核实 COS 删除权限、备份策略和删除留存要求。
+
+## 9. 实施范围与验收清单
+
+### 9.1 改造范围
+
+| 层级 | 需要改造 | 明确不做 |
+| --- | --- | --- |
+| RN | 移除问卷步骤；增加语言/环境信息、幂等提交、状态列表、详情依据、轮询、重试/取消 | 实时字幕、录音自动分片、WebSocket。 |
+| FastAPI | 新提交/查询/重试/取消接口；任务状态摘要；删除事务处理 | 在上传接口内直接调用 ASR/DeepSeek。 |
+| 数据库 | 采集记录调整；新增分析任务表、索引和唯一约束 | 兼容旧问卷记录。 |
+| Worker | 原子领取、腾讯云签名请求、DeepSeek 结构化结果校验、超时/重试/取消恢复 | 把原始音频传给 DeepSeek。 |
+| 部署 | Compose 新增无端口 Worker 服务；补充环境变量 | 向公网开放 MySQL 或 Worker。 |
+
+### 9.2 面试演示验收
+
+1. 使用 Android App 录制普通话短朗读，提交后能在列表立即看到“待转录”或后续状态。
+2. Worker 正常运行时，列表依次出现“转录中”“AI 分析中”“分析完成”的真实状态变化。
+3. 详情页展示真实腾讯云 ASR 转写、音频时长、至少一条句段时间依据，以及 DeepSeek 返回的受约束分析结果和免责声明。
+4. 通过关闭/错误配置外部服务等可控方式触发失败后，任务最终显示失败阶段和可操作的“重新分析”。
+5. 对失败记录点击重新分析，不重新录音或上传，任务再次进入待处理状态。
+6. 取消处理中任务后，任务显示“已取消”，Worker 不写入新的结果。
+7. 删除单条记录或匿名 ID 全部数据后，API 不再在列表/详情返回该记录；COS 删除结果需有服务端日志或可观察结果确认。
+8. 同一 `idempotency_key` 重复提交时，后端返回同一记录/任务，不创建重复记录。
+
+## 10. 风险与待确认项
+
+| 项目 | 当前结论 | 上线/演示前动作 |
+| --- | --- | --- |
+| 腾讯云 ASR 开通 | 用户已选择极速版接口；是否已开通服务未知 | 在控制台开通录音文件识别极速版，并确认 `AppID` 与密钥可调用。 |
+| ASR 密钥权限 | 计划复用 COS 服务端密钥 | 确认该密钥具有 ASR 调用权限，生产环境应遵循最小权限。 |
+| M4A 实机兼容性 | 文档声明极速版支持 M4A，当前 Android 输出也是 M4A/AAC | 用真实 Android 录音做一次 ASR 冒烟验证。 |
+| DeepSeek 模型与 JSON 稳定性 | 计划要求结构化 JSON 并在 Worker 校验 | 用真实 Key 验证模型名、接口格式、超时与失败提示。 |
+| 数据库迁移 | Demo 可重置开发数据库 | 实施时删除旧问卷字段或创建迁移脚本，二者择一并保持模型一致。 |
+| 语音“情感”准确性 | 未做模型评测，不得作准确性承诺 | 使用“实验性表达洞察”文案，不将输出用于诊断、风控或任何高风险决策。 |

@@ -10,14 +10,14 @@
     "test": "jest"
   },
   "dependencies": {
+    "@babel/runtime": "^7.25.0",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native/new-app-screen": "0.87.1",
+    "axios": "^1.8.4",
     "react": "19.2.3",
     "react-native": "0.87.1",
-    "@react-native/new-app-screen": "0.87.1",
-    "react-native-safe-area-context": "^5.5.2",
-    "@react-native-async-storage/async-storage": "^2.2.0",
-    "axios": "^1.8.4",
     "react-native-audio-recorder-player": "3.3.3",
-    "@babel/runtime": "^7.25.0"
+    "react-native-safe-area-context": "^5.5.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
