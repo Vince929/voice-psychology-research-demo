@@ -50,6 +50,11 @@ export type AnalysisResult = {
   expression_state: string;
   vitality_score: number;
   tension_score: number;
+  emotion_dimensions?: {
+    valence: string;
+    arousal: string;
+    stability: string;
+  };
   evidence: string[];
   summary: string;
   suggestion: string;
