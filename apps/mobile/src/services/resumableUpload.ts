@@ -181,6 +181,14 @@ function toDraftProgress(draft: UploadDraft, session?: UploadSessionResponse): U
   };
 }
 
+export async function discardUploadDraft(draft: UploadDraft) {
+  if (activeUploadKeys.has(draft.idempotencyKey)) {
+    throw new Error('录音正在上传，暂时无法删除。');
+  }
+  await finalizeLocalDraft(draft);
+  notifyUploadProgress();
+}
+
 export async function getPendingUploadDrafts(): Promise<UploadDraftProgress[]> {
   const drafts = await loadDrafts();
   return Promise.all(drafts.map(async draft => {
