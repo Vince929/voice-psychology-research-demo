@@ -9,7 +9,11 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import android.util.Base64
 import java.io.File
+import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
 class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
   private var recorder: MediaRecorder? = null
@@ -102,38 +106,103 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
   @ReactMethod
   fun play(url: String, promise: Promise) {
     player?.release()
-    val newPlayer = MediaPlayer()
+    player = null
+
+    val settled = AtomicBoolean(false)
+
+    if (url.startsWith("file://")) {
+      playFromFile(url.removePrefix("file://"), promise, settled)
+      return
+    }
+
+    // Remote URL: download to local cache first, then play from file.
+    Thread {
+      try {
+        downloadAndPlay(url, promise, settled)
+      } catch (error: Exception) {
+        if (settled.compareAndSet(false, true)) {
+          promise.reject("AUDIO_DOWNLOAD_FAILED", "下载录音失败，请检查网络后重试。", error)
+        }
+      }
+    }.start()
+  }
+
+  private fun downloadAndPlay(urlString: String, promise: Promise, settled: AtomicBoolean) {
+    val playbackDir = File(reactContext.cacheDir, "playback").apply { mkdirs() }
+    val localFile = File(playbackDir, "play-${System.currentTimeMillis()}.audio")
+
     try {
-      newPlayer.setDataSource(url)
-      newPlayer.setOnPreparedListener {
-        it.start()
-        promise.resolve(null)
+      val connection = URL(urlString).openConnection() as HttpURLConnection
+      connection.connectTimeout = 15_000
+      connection.readTimeout = 30_000
+      connection.connect()
+
+      if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+        if (settled.compareAndSet(false, true)) {
+          promise.reject("AUDIO_DOWNLOAD_FAILED", "下载录音失败（HTTP ${connection.responseCode}），请稍后重试。")
+        }
+        connection.disconnect()
+        return
       }
-      newPlayer.setOnCompletionListener { completedPlayer ->
-        completedPlayer.release()
-        if (player === completedPlayer) {
-          player = null
-          reactContext.emitDeviceEvent("VoiceRecorderPlaybackStopped", null)
+
+      connection.inputStream.use { input ->
+        FileOutputStream(localFile).use { output ->
+          input.copyTo(output)
         }
       }
-      newPlayer.setOnErrorListener { failedPlayer, _, _ ->
-        failedPlayer.release()
-        if (player === failedPlayer) {
-          player = null
-          reactContext.emitDeviceEvent("VoiceRecorderPlaybackStopped", null)
-        }
-        promise.reject("AUDIO_PLAYBACK_FAILED", "无法播放该录音，请稍后重试。")
-        true
+      connection.disconnect()
+
+      if (settled.get()) {
+        localFile.delete()
+        return
       }
-      player = newPlayer
-      newPlayer.prepareAsync()
+
+      playFromFile(localFile.absolutePath, promise, settled)
     } catch (error: Exception) {
-      newPlayer.release()
-      if (player === newPlayer) {
+      localFile.delete()
+      throw error
+    }
+  }
+
+  private fun playFromFile(filePath: String, promise: Promise, settled: AtomicBoolean) {
+    val newPlayer = MediaPlayer()
+    newPlayer.setOnPreparedListener {
+      if (settled.compareAndSet(false, true)) {
+        try {
+          it.start()
+          promise.resolve(null)
+        } catch (error: Exception) {
+          it.release()
+          promise.reject("AUDIO_PLAYBACK_FAILED", "播放启动失败，请重试。", error)
+        }
+      } else {
+        it.release()
+      }
+    }
+    newPlayer.setOnCompletionListener { completedPlayer ->
+      completedPlayer.release()
+      if (player === completedPlayer) {
+        player = null
+        reactContext.emitDeviceEvent("VoiceRecorderPlaybackStopped", null)
+      }
+    }
+    newPlayer.setOnErrorListener { failedPlayer, what, extra ->
+      failedPlayer.release()
+      val wasActive = player === failedPlayer
+      if (wasActive) {
         player = null
       }
-      promise.reject("AUDIO_PLAYBACK_FAILED", "无法播放该录音，请稍后重试。", error)
+      if (settled.compareAndSet(false, true)) {
+        promise.reject("AUDIO_PLAYBACK_FAILED", "音频播放失败（error: $what, $extra），请重试。")
+      }
+      if (wasActive) {
+        reactContext.emitDeviceEvent("VoiceRecorderPlaybackStopped", null)
+      }
+      true
     }
+    newPlayer.setDataSource(filePath)
+    player = newPlayer
+    newPlayer.prepare()
   }
 
   @ReactMethod
@@ -174,4 +243,16 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
     outputFile = null
     super.invalidate()
   }
+}
+
+private fun java.io.InputStream.copyTo(out: java.io.OutputStream, bufferSize: Int = 8192): Long {
+  var bytesCopied: Long = 0
+  val buffer = ByteArray(bufferSize)
+  var bytes = read(buffer)
+  while (bytes >= 0) {
+    out.write(buffer, 0, bytes)
+    bytesCopied += bytes
+    bytes = read(buffer)
+  }
+  return bytesCopied
 }
