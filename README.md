@@ -10,12 +10,18 @@
 
 ## 图示
 
-<img width="1264" height="2800" alt="8a7c8832-8ebf-429c-ba77-15810b67fd9e" src="https://github.com/user-attachments/assets/0b99920a-ba30-4aea-a7b1-92811a7dbe9f" />
-<img width="1264" height="2800" alt="60fc7ea1-5803-4c10-983c-2921977eb74d" src="https://github.com/user-attachments/assets/18d21785-9475-421e-9212-ea063c85aa11" />
-<img width="1264" height="2800" alt="fb6df787-3d01-45eb-b2a8-9c711568fb14" src="https://github.com/user-attachments/assets/b6127817-1c1f-48ec-826b-6227707dc53e" />
-<img width="1264" height="2800" alt="a9319c30-732e-4f6f-b9e1-dce7befc5323" src="https://github.com/user-attachments/assets/cf8ad34a-1081-4ecd-a6d8-1b6978a26e55" />
-<img width="1264" height="2800" alt="b02e9041-84a8-4a20-b56c-d94296234599" src="https://github.com/user-attachments/assets/e914eb7f-4ffd-4295-89c6-4a68b3d72300" />
-<img width="1264" height="2800" alt="885c9a1a-b943-4f10-877f-b4bd2b5b1a60" src="https://github.com/user-attachments/assets/da4b8559-b8ea-4a1d-b25f-8f954a3a59e0" />
+<table>
+  <tr>
+    <td><img width="260" alt="8a7c8832-8ebf-429c-ba77-15810b67fd9e" src="https://github.com/user-attachments/assets/0b99920a-ba30-4aea-a7b1-92811a7dbe9f" /></td>
+    <td><img width="260" alt="60fc7ea1-5803-4c10-983c-2921977eb74d" src="https://github.com/user-attachments/assets/18d21785-9475-421e-9212-ea063c85aa11" /></td>
+    <td><img width="260" alt="fb6df787-3d01-45eb-b2a8-9c711568fb14" src="https://github.com/user-attachments/assets/b6127817-1c1f-48ec-826b-6227707dc53e" /></td>
+  </tr>
+  <tr>
+    <td><img width="260" alt="a9319c30-732e-4f6f-b9e1-dce7befc5323" src="https://github.com/user-attachments/assets/cf8ad34a-1081-4ecd-a6d8-1b6978a26e55" /></td>
+    <td><img width="260" alt="b02e9041-84a8-4a20-b56c-d94296234599" src="https://github.com/user-attachments/assets/e914eb7f-4ffd-4295-89c6-4a68b3d72300" /></td>
+    <td><img width="260" alt="885c9a1a-b943-4f10-877f-b4bd2b5b1a60" src="https://github.com/user-attachments/assets/da4b8559-b8ea-4a1d-b25f-8f954a3a59e0" /></td>
+  </tr>
+</table>
 
 ## 分析全流程
 
