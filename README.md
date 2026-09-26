@@ -4,6 +4,10 @@
 
 > ⚠️ 实验性预测，仅供演示与自我观察，不构成医疗、心理诊断或人格测评。
 
+## 下载地址
+
+- **Android APK**：[app-release.apk](https://cloud1-0gys80m48da147a1-1304271127.tcloudbaseapp.com/app-release.apk)
+
 ## 核心功能
 
 - **分块断点续传上传**：App 端将录音分片上传，弱网或中断后可从断点恢复，不重录不重传已完成分片。
