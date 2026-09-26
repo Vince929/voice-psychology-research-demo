@@ -218,7 +218,6 @@ export default function App() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, step === 'record' && styles.recordContent, step === 'records' && styles.recordsContent]}>
         {step === 'consent' && (
           <View style={styles.section}>
-            <View style={styles.introMark}><Text style={styles.introMarkText}>01</Text><Text style={styles.introMarkCaption}>开始之前</Text></View>
             <Text style={styles.heading}>参与前，请先确认</Text>
             <Text style={styles.body}>这是用于自我观察的语音表达研究演示。结果不构成医疗、心理诊断或人格测评；你可以随时删除自己的录音与分析数据。</Text>
             <Pressable
@@ -239,7 +238,6 @@ export default function App() {
         )}
         {step === 'subject' && (
           <View style={styles.section}>
-            <View style={styles.introMark}><Text style={styles.introMarkText}>02</Text><Text style={styles.introMarkCaption}>仅用于记录</Text></View>
             <Text style={styles.heading}>匿名采集信息</Text>
             <Text style={styles.body}>不收集姓名和手机号。以下信息只用于记录与质量解释，不参与 AI 表达判断。</Text>
             <View style={styles.formCard}>
@@ -254,7 +252,6 @@ export default function App() {
         )}
         {step === 'record' && (
           <View style={styles.section}>
-            <View style={styles.introMark}><Text style={styles.introMarkText}>03</Text><Text style={styles.introMarkCaption}>保持自然</Text></View>
             <View style={styles.recordHeadingRow}>
               <Text style={styles.heading}>朗读采集</Text>
               <Pressable accessibilityRole="switch" accessibilityState={{checked: demoUploadMode}} style={({pressed}) => [styles.uploadModeToggle, demoUploadMode && styles.uploadModeToggleActive, pressed && styles.pressed]} onPress={toggleDemoUploadMode}>

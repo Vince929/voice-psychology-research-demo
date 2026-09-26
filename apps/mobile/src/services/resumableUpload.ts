@@ -8,7 +8,7 @@ const DRAFTS_STORAGE_KEY = '@voice-psychology/upload-drafts/v1';
 // Tencent COS requires every multipart part except the last one to be at least 1 MiB.
 const STANDARD_PART_SIZE_BYTES = 1024 * 1024;
 const DEMO_PART_SIZE_BYTES = STANDARD_PART_SIZE_BYTES;
-const DEMO_PART_DELAY_MS = 3000;
+const DEMO_PART_DELAY_MS = 10000;
 
 let demoUploadModeEnabled = false;
 

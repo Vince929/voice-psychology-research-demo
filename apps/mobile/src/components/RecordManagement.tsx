@@ -172,15 +172,15 @@ function taskLabel(task: RecordSummary['task'] | CollectionRecord['task']) {
 }
 
 const EMOTION_KEYWORD_LABELS: Record<string, string> = {
-  '积极': '倾向·积极',
-  '低落': '倾向·低落',
-  '平静': '表达·平静',
-  '兴奋': '表达·活跃',
-  '紧张': '表达·紧张',
-  '低活力': '表达·低活力',
-  '稳定': '状态·稳定',
-  '波动': '状态·波动',
-  '专注': '表达·专注',
+  '积极': '积极',
+  '低落': '低落',
+  '平静': '平静',
+  '兴奋': '活跃',
+  '紧张': '紧张',
+  '低活力': '低活力',
+  '稳定': '稳定',
+  '波动': '波动',
+  '专注': '专注',
 };
 
 function emotionKeywordParts(keyword: string) {
