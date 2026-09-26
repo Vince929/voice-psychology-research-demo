@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
   promptLabel: {fontSize: 12, letterSpacing: 1.2, fontWeight: '900', color: '#A56826'},
   prompt: {fontSize: 19, lineHeight: 32, color: '#49351E', fontWeight: '600'},
   recordingDock: {position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
-  recordsActionDock: {position: 'absolute', left: 0, right: 0, bottom: 0, gap: 9, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 6, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
+  recordsActionDock: {position: 'absolute', left: 0, right: 0, bottom: 0, gap: 9, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
   newParticipantButton: {minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#BFD4C8', backgroundColor: '#F8FBF8'},
   newParticipantButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
   dockRecordsButton: {alignSelf: 'stretch', minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, zIndex: 2, elevation: 0, backgroundColor: 'transparent'},
