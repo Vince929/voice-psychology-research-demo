@@ -533,7 +533,7 @@ function SectionBlock({title, value}: {title: string; value: string}) {
 }
 
 function PrimaryButton({label, disabled, active, onPress}: {label: string; disabled?: boolean; active?: boolean; onPress: () => void}) {
-  const iconSize = 20;
+  const iconSize = 16;
   const iconEl = active
     ? <View key="stop" style={{width: iconSize, height: iconSize, backgroundColor: '#FFFFFF'}} />
     : <View key="play" style={{width: 0, height: 0, borderTopWidth: iconSize / 2, borderTopColor: 'transparent', borderBottomWidth: iconSize / 2, borderBottomColor: 'transparent', borderLeftWidth: iconSize, borderLeftColor: '#FFFFFF'}} />;
