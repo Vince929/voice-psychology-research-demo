@@ -379,15 +379,12 @@ function Choice({label, value, choices, labels, onChange}: {label?: string; valu
   return <View style={styles.field}>{label ? <Text style={styles.label}>{label}</Text> : null}<View style={styles.choiceGroup}>{choices.map((choice, index) => <Pressable key={choice} style={({pressed}) => [styles.choice, value === choice && styles.choiceActive, pressed && styles.pressed]} onPress={() => onChange(choice)}><Text style={[styles.choiceText, value === choice && styles.choiceTextActive]}>{labels?.[index] || choice}</Text></Pressable>)}</View></View>;
 }
 
-function PlaybackIcon({size, playing}: {size: number; playing: boolean}) {
-  if (playing) {
-    return <View style={{width: size * 0.7, height: size * 0.7, backgroundColor: '#FFFFFF'}} />;
-  }
-  return <View style={{width: 0, height: 0, borderTopWidth: size / 2, borderTopColor: 'transparent', borderBottomWidth: size / 2, borderBottomColor: 'transparent', borderLeftWidth: size, borderLeftColor: '#FFFFFF'}} />;
-}
-
 function PrimaryButton({label, disabled, onPress, recording, iconLarge}: {label: string; disabled?: boolean; onPress: () => void; recording?: boolean; iconLarge?: boolean}) {
-  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, recording && styles.buttonRecording, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text>{iconLarge ? <PlaybackIcon size={28} playing={recording} /> : <View style={{marginLeft: 8}}><PlaybackIcon size={14} playing={recording} />}</View>}</Pressable>;
+  const iconSize = iconLarge ? 20 : 12;
+  const iconEl = recording
+    ? <View key="stop" style={{width: iconSize, height: iconSize, backgroundColor: '#FFFFFF'}} />
+    : <View key="play" style={{width: 0, height: 0, borderTopWidth: iconSize / 2, borderTopColor: 'transparent', borderBottomWidth: iconSize / 2, borderBottomColor: 'transparent', borderLeftWidth: iconSize, borderLeftColor: '#FFFFFF'}} />;
+  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, recording && styles.buttonRecording, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text><View style={{marginLeft: iconLarge ? 12 : 8}}>{iconEl}</View></Pressable>;
 }
 
 const styles = StyleSheet.create({
