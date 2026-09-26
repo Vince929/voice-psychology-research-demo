@@ -13,6 +13,7 @@ import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
@@ -38,7 +39,6 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
       newRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
       newRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
       newRecorder.setAudioSamplingRate(44_100)
-      // Demo uploads use a larger but still commonly supported AAC bitrate, so a short recording reaches a 1 MiB upload part sooner.
       newRecorder.setAudioEncodingBitRate(if (demoUpload) 512_000 else 128_000)
       newRecorder.setOutputFile(audioFile.absolutePath)
       newRecorder.prepare()
@@ -115,11 +115,15 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
       return
     }
 
-    // Remote URL: download to local cache first, then play from file.
+    // Notify JS that download is starting
+    reactContext.emitDeviceEvent("VoiceRecorderDownloadStarted", null)
+
+    // Remote URL: download to local cache (keyed by URL hash), then play from file.
     Thread {
       try {
         downloadAndPlay(url, promise, settled)
       } catch (error: Exception) {
+        reactContext.emitDeviceEvent("VoiceRecorderDownloadEnded", null)
         if (settled.compareAndSet(false, true)) {
           promise.reject("AUDIO_DOWNLOAD_FAILED", "下载录音失败，请检查网络后重试。", error)
         }
@@ -129,8 +133,17 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
 
   private fun downloadAndPlay(urlString: String, promise: Promise, settled: AtomicBoolean) {
     val playbackDir = File(reactContext.cacheDir, "playback").apply { mkdirs() }
-    val localFile = File(playbackDir, "play-${System.currentTimeMillis()}.audio")
+    val cacheKey = sha256(urlString).take(16)
+    val localFile = File(playbackDir, "audio-$cacheKey")
 
+    // Reuse cache if the file already exists (non-empty).
+    if (localFile.isFile() && localFile.length() > 0 && !settled.get()) {
+      reactContext.emitDeviceEvent("VoiceRecorderDownloadEnded", null)
+      playFromFile(localFile.absolutePath, promise, settled)
+      return
+    }
+
+    val tmpFile = File(playbackDir, "tmp-$cacheKey-${System.currentTimeMillis()}")
     try {
       val connection = URL(urlString).openConnection() as HttpURLConnection
       connection.connectTimeout = 15_000
@@ -139,6 +152,7 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
 
       if (connection.responseCode != HttpURLConnection.HTTP_OK) {
         if (settled.compareAndSet(false, true)) {
+          reactContext.emitDeviceEvent("VoiceRecorderDownloadEnded", null)
           promise.reject("AUDIO_DOWNLOAD_FAILED", "下载录音失败（HTTP ${connection.responseCode}），请稍后重试。")
         }
         connection.disconnect()
@@ -146,20 +160,25 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
       }
 
       connection.inputStream.use { input ->
-        FileOutputStream(localFile).use { output ->
+        FileOutputStream(tmpFile).use { output ->
           input.copyTo(output)
         }
       }
       connection.disconnect()
 
       if (settled.get()) {
-        localFile.delete()
+        tmpFile.delete()
         return
       }
 
+      // Atomically replace the cache file.
+      if (localFile.exists()) localFile.delete()
+      tmpFile.renameTo(localFile)
+
+      reactContext.emitDeviceEvent("VoiceRecorderDownloadEnded", null)
       playFromFile(localFile.absolutePath, promise, settled)
     } catch (error: Exception) {
-      localFile.delete()
+      tmpFile.delete()
       throw error
     }
   }
@@ -242,6 +261,12 @@ class VoiceRecorderModule(private val reactContext: ReactApplicationContext) : R
     player = null
     outputFile = null
     super.invalidate()
+  }
+
+  private fun sha256(input: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val hashBytes = digest.digest(input.toByteArray())
+    return hashBytes.joinToString("") { "%02x".format(it) }
   }
 }
 

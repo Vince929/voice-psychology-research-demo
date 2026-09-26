@@ -14,8 +14,8 @@ import {
   listRecords,
   retryAnalysis,
 } from '../services/api';
-import {playRemoteAudio, recordingErrorMessage, stopRemoteAudio, subscribeToPlaybackStopped} from '../services/recorder';
-import {getPendingUploadDrafts, resumeUpload, subscribeToUploadProgress, uploadErrorMessage, UploadDraftProgress} from '../services/resumableUpload';
+import {playRemoteAudio, recordingErrorMessage, stopRemoteAudio, subscribeToDownloadEnded, subscribeToDownloadStarted, subscribeToPlaybackStopped} from '../services/recorder';
+import {discardUploadDraft, getPendingUploadDrafts, resumeUpload, subscribeToUploadProgress, uploadErrorMessage, UploadDraftProgress} from '../services/resumableUpload';
 
 type NoticeTone = 'success' | 'error' | 'info';
 
@@ -193,6 +193,7 @@ export function RecordManagement({onNotice}: RecordManagementProps) {
   const [records, setRecords] = useState<RecordSummary[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CollectionRecord | null>(null);
   const [playingRecordId, setPlayingRecordId] = useState<number | null>(null);
+  const [downloadRecordId, setDownloadRecordId] = useState<number | null>(null);
   const [uploadDrafts, setUploadDrafts] = useState<UploadDraftProgress[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -232,6 +233,14 @@ export function RecordManagement({onNotice}: RecordManagementProps) {
 
   useEffect(() => subscribeToPlaybackStopped(() => setPlayingRecordId(null)), []);
 
+  useEffect(() => subscribeToDownloadStarted(() => {
+    // The event has no payload, so we rely on the toggleAudio flow to set downloadRecordId beforehand.
+  }), []);
+
+  useEffect(() => subscribeToDownloadEnded(() => {
+    setDownloadRecordId(null);
+  }), []);
+
   useEffect(() => {
     if (!records.some(record => record.task && ACTIVE_STATUSES.includes(record.task.status))) {
       return;
@@ -251,15 +260,20 @@ export function RecordManagement({onNotice}: RecordManagementProps) {
   async function toggleAudio(recordId: number) {
     try {
       if (playingRecordId === recordId) {
-        await stopRemoteAudio();
+        stopRemoteAudio();
         setPlayingRecordId(null);
         return;
       }
       if (playingRecordId !== null) {
-        await stopRemoteAudio();
+        stopRemoteAudio();
       }
-      await playRemoteAudio(getAudioUrl(recordId));
-      setPlayingRecordId(recordId);
+      setDownloadRecordId(recordId);
+      try {
+        await playRemoteAudio(getAudioUrl(recordId));
+        setPlayingRecordId(recordId);
+      } finally {
+        setDownloadRecordId(current => current === recordId ? null : current);
+      }
     } catch (error) {
       onNotice(`音频播放失败：${recordingErrorMessage(error)}`, 'error');
     }
@@ -309,6 +323,25 @@ export function RecordManagement({onNotice}: RecordManagementProps) {
     await loadUploadDrafts();
     onNotice(`继续上传失败：${uploadErrorMessage(error)}`, 'error');
   }
+  }
+
+  function confirmDeleteUploadDraft(draft: UploadDraftProgress) {
+    Alert.alert('删除待上传录音？', '会删除本机录音文件及上传进度，无法恢复。', [
+      {text: '取消', style: 'cancel'},
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await discardUploadDraft(draft);
+            await loadUploadDrafts();
+            onNotice('待上传录音已删除。', 'success');
+          } catch (error) {
+            onNotice(`删除失败：${uploadErrorMessage(error)}`, 'error');
+          }
+        },
+      },
+    ]);
   }
 
   function confirmDeleteRecord(record: RecordSummary) {
@@ -368,16 +401,16 @@ export function RecordManagement({onNotice}: RecordManagementProps) {
           <Text style={styles.empty}>完成一次录音并提交后，转录与分析进度会显示在这里。</Text>
         </View>
       ) : null}
-      {uploadDrafts.map(draft => <UploadCard key={draft.idempotencyKey} draft={draft} onResume={() => void handleResumeUpload(draft)} />)}
+      {uploadDrafts.map(draft => <UploadCard key={draft.idempotencyKey} draft={draft} onResume={() => void handleResumeUpload(draft)} onDelete={() => confirmDeleteUploadDraft(draft)} />)}
       {records.map(record => <RecordCard key={record.id} record={record} onDetail={() => void showRecord(record.id)} onRetry={() => void handleRetry(record.id)} onDelete={() => confirmDeleteRecord(record)} />)}
       <Modal visible={selectedRecord !== null} animationType="slide" transparent onRequestClose={() => void closeRecordDetail()}>
-        {selectedRecord ? <RecordDetail record={selectedRecord} isPlaying={playingRecordId === selectedRecord.id} onClose={() => void closeRecordDetail()} onTogglePlayback={() => void toggleAudio(selectedRecord.id)} onRetry={() => void handleRetry(selectedRecord.id)} onCancel={() => void handleCancel(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
+        {selectedRecord ? <RecordDetail record={selectedRecord} isPlaying={playingRecordId === selectedRecord.id} isDownloading={downloadRecordId === selectedRecord.id} onClose={() => void closeRecordDetail()} onTogglePlayback={() => void toggleAudio(selectedRecord.id)} onRetry={() => void handleRetry(selectedRecord.id)} onCancel={() => void handleCancel(selectedRecord.id)} onDeleteRecord={() => confirmDeleteRecord(selectedRecord)} onDeleteSubject={() => confirmDeleteSubject(selectedRecord.subject_id)} /> : null}
       </Modal>
     </View>
   );
 }
 
-function UploadCard({draft, onResume}: {draft: UploadDraftProgress; onResume: () => void}) {
+function UploadCard({draft, onResume, onDelete}: {draft: UploadDraftProgress; onResume: () => void; onDelete: () => void}) {
   const progress = draft.totalBytes > 0 ? Math.min(100, Math.round(draft.uploadedBytes / draft.totalBytes * 100)) : 0;
   return <View style={[styles.recordCard, styles.uploadCard]}>
     <View style={styles.recordTopRow}>
@@ -387,7 +420,7 @@ function UploadCard({draft, onResume}: {draft: UploadDraftProgress; onResume: ()
     <View style={styles.uploadProgressHeader}><Text style={styles.uploadProgressText}>已上传 {draft.uploadedPartCount} / {draft.partCount} 个分块</Text><Text style={styles.uploadProgressText}>{progress}%</Text></View>
     <View style={styles.uploadProgressTrack}><View style={[styles.uploadProgressFill, {width: `${progress}%`}]} /></View>
     <Text style={styles.recordTime}>{draft.createdAt ? formatTime(draft.createdAt) : '录音待上传'}</Text>
-    {!draft.uploading ? <View style={styles.actionRow}><ActionButton label="继续上传" onPress={onResume} /></View> : <Text style={styles.uploadHint}>上传完成后将自动进入转录与 AI 分析。</Text>}
+    {!draft.uploading ? <View style={styles.actionRow}><ActionButton label="继续上传" onPress={onResume} /><ActionButton label="删除" destructive onPress={onDelete} /></View> : <Text style={styles.uploadHint}>上传完成后将自动进入转录与 AI 分析。</Text>}
   </View>;
 }
 
@@ -420,10 +453,11 @@ function RecordCard({record, onDetail, onRetry, onDelete}: {record: RecordSummar
   );
 }
 
-function RecordDetail({record, isPlaying, onClose, onTogglePlayback, onRetry, onCancel, onDeleteRecord, onDeleteSubject}: {record: CollectionRecord; isPlaying: boolean; onClose: () => void; onTogglePlayback: () => void; onRetry: () => void; onCancel: () => void; onDeleteRecord: () => void; onDeleteSubject: () => void}) {
+function RecordDetail({record, isPlaying, isDownloading, onClose, onTogglePlayback, onRetry, onCancel, onDeleteRecord, onDeleteSubject}: {record: CollectionRecord; isPlaying: boolean; isDownloading: boolean; onClose: () => void; onTogglePlayback: () => void; onRetry: () => void; onCancel: () => void; onDeleteRecord: () => void; onDeleteSubject: () => void}) {
   const task = record.task;
   const isActive = Boolean(task && ACTIVE_STATUSES.includes(task.status));
   const sentences = record.asr_result?.flash_result?.flatMap(result => result.sentence_list || []) || [];
+  const audioLabel = isDownloading ? '下载中…' : isPlaying ? '停止播放' : '播放原始录音';
   return (
     <View style={styles.modalBackdrop}>
       <View style={styles.detailSheet}>
@@ -441,7 +475,7 @@ function RecordDetail({record, isPlaying, onClose, onTogglePlayback, onRetry, on
           </View>
           <Text style={styles.detailText}>年龄段：{record.age_group || '未填写'}　性别：{record.gender || '未填写'}</Text>
           <Text style={styles.detailText}>语言：{record.language || '普通话'}　环境：{record.recording_environment || '未填写'}</Text>
-          <PrimaryButton label={isPlaying ? '停止播放' : '播放原始录音'} active={isPlaying} onPress={onTogglePlayback} />
+          <PrimaryButton label={audioLabel} active={isPlaying} disabled={isDownloading} iconLarge onPress={onTogglePlayback} />
           {isActive ? <ActionButton label="取消当前分析" destructive onPress={onCancel} /> : null}
           {!isActive ? <ActionButton label="重新分析" onPress={onRetry} /> : null}
           {task?.status === 'failed' && taskErrorMessage(task) ? <SectionBlock title="任务状态" value={`${task.failed_stage === 'transcription' ? '转录' : '分析'}失败：${taskErrorMessage(task)}`} /> : null}

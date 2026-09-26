@@ -68,6 +68,16 @@ export function subscribeToPlaybackStopped(listener: () => void) {
   return () => subscription.remove();
 }
 
+export function subscribeToDownloadStarted(listener: () => void) {
+  const subscription = DeviceEventEmitter.addListener('VoiceRecorderDownloadStarted', listener);
+  return () => subscription.remove();
+}
+
+export function subscribeToDownloadEnded(listener: () => void) {
+  const subscription = DeviceEventEmitter.addListener('VoiceRecorderDownloadEnded', listener);
+  return () => subscription.remove();
+}
+
 export function recordingErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message;

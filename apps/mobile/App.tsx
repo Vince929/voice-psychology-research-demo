@@ -379,8 +379,8 @@ function Choice({label, value, choices, labels, onChange}: {label?: string; valu
   return <View style={styles.field}>{label ? <Text style={styles.label}>{label}</Text> : null}<View style={styles.choiceGroup}>{choices.map((choice, index) => <Pressable key={choice} style={({pressed}) => [styles.choice, value === choice && styles.choiceActive, pressed && styles.pressed]} onPress={() => onChange(choice)}><Text style={[styles.choiceText, value === choice && styles.choiceTextActive]}>{labels?.[index] || choice}</Text></Pressable>)}</View></View>;
 }
 
-function PrimaryButton({label, disabled, onPress, recording}: {label: string; disabled?: boolean; onPress: () => void; recording?: boolean}) {
-  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, recording && styles.buttonRecording, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text><Text style={styles.buttonArrow}>{recording ? '■' : '→'}</Text></Pressable>;
+function PrimaryButton({label, disabled, onPress, recording, iconLarge}: {label: string; disabled?: boolean; onPress: () => void; recording?: boolean; iconLarge?: boolean}) {
+  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, recording && styles.buttonRecording, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text><Text style={iconLarge ? styles.buttonIconLarge : styles.buttonArrow}>{recording ? '■' : '→'}</Text></Pressable>;
 }
 
 const styles = StyleSheet.create({
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
   promptLabel: {fontSize: 12, letterSpacing: 1.2, fontWeight: '900', color: '#A56826'},
   prompt: {fontSize: 19, lineHeight: 32, color: '#49351E', fontWeight: '600'},
   recordingDock: {position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
-  recordsActionDock: {position: 'absolute', left: 0, right: 0, bottom: 0, gap: 9, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
+  recordsActionDock: {position: 'absolute', left: 0, right: 0, bottom: 0, gap: 9, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 6, backgroundColor: '#F6F2EA', borderTopWidth: 1, borderTopColor: '#DFE1D8', shadowColor: '#173A35', shadowOpacity: 0.13, shadowRadius: 12, shadowOffset: {width: 0, height: -4}, elevation: 12},
   newParticipantButton: {minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#BFD4C8', backgroundColor: '#F8FBF8'},
   newParticipantButtonText: {fontSize: 14, fontWeight: '800', color: '#1D6258'},
   dockRecordsButton: {alignSelf: 'stretch', minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, zIndex: 2, elevation: 0, backgroundColor: 'transparent'},
@@ -482,6 +482,7 @@ const styles = StyleSheet.create({
   buttonPressed: {transform: [{scale: 0.985}], shadowOpacity: 0.1},
   buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
   buttonArrow: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
+  buttonIconLarge: {fontWeight: '800', fontSize: 26, lineHeight: 30, color: '#FFFFFF'},
   statusMessage: {fontSize: 12, textAlign: 'center', color: '#27705F', fontWeight: '700'},
   errorMessage: {fontSize: 12, textAlign: 'center', color: '#B04E3C', fontWeight: '700'},
   textLink: {alignSelf: 'center', padding: 8},
