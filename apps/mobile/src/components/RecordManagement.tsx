@@ -533,7 +533,11 @@ function SectionBlock({title, value}: {title: string; value: string}) {
 }
 
 function PrimaryButton({label, disabled, active, onPress}: {label: string; disabled?: boolean; active?: boolean; onPress: () => void}) {
-  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text><Text style={styles.buttonArrow}>{active ? '■' : '→'}</Text></Pressable>;
+  const iconSize = 20;
+  const iconEl = active
+    ? <View key="stop" style={{width: iconSize, height: iconSize, backgroundColor: '#FFFFFF'}} />
+    : <View key="play" style={{width: 0, height: 0, borderTopWidth: iconSize / 2, borderTopColor: 'transparent', borderBottomWidth: iconSize / 2, borderBottomColor: 'transparent', borderLeftWidth: iconSize, borderLeftColor: '#FFFFFF'}} />;
+  return <Pressable disabled={disabled} style={({pressed}) => [styles.button, disabled && styles.buttonDisabled, pressed && !disabled && styles.buttonPressed]} onPress={onPress}><Text style={styles.buttonText}>{label}</Text><View style={{marginLeft: 12}}>{iconEl}</View></Pressable>;
 }
 
 function ActionButton({label, destructive, onPress}: {label: string; destructive?: boolean; onPress: () => void}) {
@@ -554,6 +558,7 @@ const styles = StyleSheet.create({
   buttonPressed: {transform: [{scale: 0.985}]},
   buttonText: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
   buttonArrow: {fontWeight: '800', fontSize: 16, color: '#FFFFFF'},
+  buttonIconWrap: {marginLeft: 12},
   emptyPanel: {padding: 25, borderRadius: 20, borderWidth: 1, borderColor: '#D9DED5', borderStyle: 'dashed', backgroundColor: '#FFFCF6', gap: 8},
   emptyTitle: {fontSize: 18, fontWeight: '800', color: '#173A35'},
   empty: {fontSize: 15, lineHeight: 22, color: '#61736B'},
