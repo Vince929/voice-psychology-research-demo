@@ -4,6 +4,14 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  react-native-document-picker@9.3.1:
+    hash: 81dc5b7ea76a0e76b6febd9b2eada5f36d894c2c1e6f1cbb549cdaad459103f7
+    path: patches/react-native-document-picker@9.3.1.patch
+  react-native-tts@4.1.1:
+    hash: ef50ac6e62855ae3512c3ea64969733e7d6cf5dccdf0ad975885a53e3076e1e5
+    path: patches/react-native-tts@4.1.1.patch
+
 importers:
 
   .: {}
@@ -31,9 +39,15 @@ importers:
       react-native-audio-recorder-player:
         specifier: 3.3.3
         version: 3.3.3(react-native@0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3)
+      react-native-document-picker:
+        specifier: ^9.3.1
+        version: 9.3.1(patch_hash=81dc5b7ea76a0e76b6febd9b2eada5f36d894c2c1e6f1cbb549cdaad459103f7)(react-native@0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3)
       react-native-safe-area-context:
         specifier: ^5.5.2
         version: 5.10.0(react-native@0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3)
+      react-native-tts:
+        specifier: ^4.1.1
+        version: 4.1.1(patch_hash=ef50ac6e62855ae3512c3ea64969733e7d6cf5dccdf0ad975885a53e3076e1e5)
     devDependencies:
       '@babel/core':
         specifier: ^7.25.2
@@ -3004,11 +3018,25 @@ packages:
       react: '*'
       react-native: '*'
 
+  react-native-document-picker@9.3.1:
+    resolution: {integrity: sha512-Vcofv9wfB0j67zawFjfq9WQPMMzXxOZL9kBmvWDpjVuEcVK73ndRmlXHlkeFl5ZHVsv4Zb6oZYhqm9u5omJOPA==}
+    deprecated: the package was renamed, follow migration instructions at https://shorturl.at/QYT4t
+    peerDependencies:
+      react: '*'
+      react-native: '*'
+      react-native-windows: '*'
+    peerDependenciesMeta:
+      react-native-windows:
+        optional: true
+
   react-native-safe-area-context@5.10.0:
     resolution: {integrity: sha512-U655+G0KItefqpTKZenr0aBNulY/49TUKSZkWGVtESlFK5qmML7BejQjPDCRU+GzC24g2KeWFJguWP5LR52dqA==}
     peerDependencies:
       react: '*'
       react-native: '*'
+
+  react-native-tts@4.1.1:
+    resolution: {integrity: sha512-VL0TgCwkUWggbbFGIXAPKC3rM1baluAYtgOdgnaTm7UYsWf/y8n5VgmVB0J2Wa8qt1dldZ1cSsdQY9iz3evcAg==}
 
   react-native@0.87.1:
     resolution: {integrity: sha512-DJKG6ANoD7BtrE4z9DewiSD7/RxCX73lK5Pu49aUr85P3333Dm2roTiP0rRjQNDZdVizHSOmstWfwF/o9EjCRA==}
@@ -7444,10 +7472,18 @@ snapshots:
       react: 19.2.3
       react-native: 0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3)
 
+  react-native-document-picker@9.3.1(patch_hash=81dc5b7ea76a0e76b6febd9b2eada5f36d894c2c1e6f1cbb549cdaad459103f7)(react-native@0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3):
+    dependencies:
+      invariant: 2.2.4
+      react: 19.2.3
+      react-native: 0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3)
+
   react-native-safe-area-context@5.10.0(react-native@0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3):
     dependencies:
       react: 19.2.3
       react-native: 0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3)
+
+  react-native-tts@4.1.1(patch_hash=ef50ac6e62855ae3512c3ea64969733e7d6cf5dccdf0ad975885a53e3076e1e5): {}
 
   react-native@0.87.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.2.3):
     dependencies:
