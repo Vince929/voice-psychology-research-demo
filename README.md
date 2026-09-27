@@ -104,19 +104,23 @@ voice_profile 由服务端按**安全要求 > 当前状态 > 用户表达偏好 
 ./cmd.sh test    # = apps/api/.venv/bin/python -m pytest tests -v（自动跑迁移 + 注入测试账号）
 ```
 
-| #   | 测试（`apps/api/tests/`）　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 | LLM　　　　|
+| #   | 测试（`apps/api/tests/`，33 集成 + 20 单元 = **53 条全通过**） | LLM　　　　|
 | -----| ---------------------------------------------------------------------------------------------------------------| ------------|
-| 1   | `test_normal_strategy.py` 普通焦虑输入选择正常支持策略，Schema 校验通过、记录可回读　　　　　　　　　　　　　 | 真实调用　 |
-| 2   | `test_ambiguous_confirmation.py` 模糊风险进入安全确认（固定问题、不给一般建议）　　　　　　　　　　　　　　　 | 规则　　　 |
-| 3   | `test_high_risk_escalation.py` 明确高风险进入 `safety_escalation`，**LLM 调用次数断言为 0**　　　　　　　　　 | 不经过 LLM |
-| 4   | `test_rejection_memory.py` 拒绝方法后 `rejected_techniques` 记录、后续轮次不再选用且面板说明避开原因　　　　　| 真实调用　 |
-| 5   | `test_cross_user_isolation.py` demo2 访问 demo1 的会话：读取/发消息/结束/删除均 404；未登录 401；错误密码 401 | 不涉及　　 |
-| 6   | `test_external_service_failure.py` LLM/ASR 不可用 → 502 且不落任何伪造回复；LLM 宕机时高危输入仍走安全分流　 | 模拟故障　 |
-| 7   | `test_session_cleanup.py` 删除会话：消息/记录级联清除 + 磁盘音频文件与目录删除　　　　　　　　　　　　　　　 | 不涉及　　 |
-| 8   | `test_voice_profile_override.py` 语音风格可编辑；高危/高焦虑轮忽略用户选择（解析函数单测 + 接口集成）　　　 | 真实调用　 |
-| 9   | `test_audit_and_redaction.py` 登录/删会/安全分流写入审计；消息内容不出现在日志与审计行（caplog 断言）　　　 | 不涉及　　 |
+| 1   | `integration/test_normal_strategy.py` 普通焦虑输入选择正常支持策略，Schema 校验通过、记录可回读　　　　　　　　　　　　　 | 真实调用　 |
+| 2   | `integration/test_ambiguous_confirmation.py` 模糊风险进入安全确认（固定问题、不给一般建议、只问一问）　　　　　　　　　　　　　　　 | 规则　　　 |
+| 3   | `integration/test_high_risk_escalation.py` 明确高风险进入 `safety_escalation`，**LLM 调用次数断言为 0**；药物剂量请求同样分流；会话风险升级　 | 不经过 LLM |
+| 4   | `integration/test_rejection_memory.py` 拒绝方法后 `rejected_techniques` 记录、后续轮次不再选用且面板说明避开原因（正则 + LLM 双通道）　 | 真实调用　 |
+| 5   | `integration/test_cross_user_isolation.py` demo2 访问 demo1 的会话：读取/发消息/结束/删除均 404；未登录 401；错误密码 401 | 不涉及　　 |
+| 6   | `integration/test_external_service_failure.py` LLM/ASR 不可用 → 502 且不落任何伪造回复；LLM 宕机时高危输入仍走安全分流　 | 模拟故障　 |
+| 7   | `integration/test_session_cleanup.py` 删除会话：消息/记录级联清除 + 磁盘音频文件与目录删除　　　　　　　　　　　　　　　 | 不涉及　　 |
+| 8   | `integration/test_voice_profile_override.py` 语音风格可编辑；高危/高焦虑轮忽略用户选择（override_applied 记录是否生效）　　　 | 真实调用　 |
+| 9   | `integration/test_audit_and_redaction.py` 登录/删会/安全分流/反馈写入审计；消息内容不出现在日志与审计行（caplog 断言）　　 | 不涉及　　 |
+| 10  | `integration/test_grounding_calm_slow.py` 紧张输入选 grounding + calm_slow 实际参数（rate=0.7/pitch=0.9/800ms）；长回复按约束截断　 | 确定性 fake |
+| 11  | `integration/test_history_and_summary.py` 结束会话→总结 8 字段→重新登录可查历史；重复结束幂等；他人仍不可见　　　　　　 | 不涉及　　 |
+| 12  | `integration/test_stream_endpoint.py` SSE 流式回复以校验后的 result 结束且落库；规则路径无逐字流　 | 真实调用　 |
+| 13  | `unit/test_core_logic.py` 安全词表分档/拒绝正则/拒绝记忆去重/voice_profile 优先级矩阵/回复约束截断/流式 JSON 提取/ASR 特征聚合/音高估计等纯函数测试 | 不涉及　　 |
 
-策略类测试真实调用 DeepSeek（需在 `.env` 配置 `DEEPSEEK_API_KEY`），断言结构与行为、不断言具体文案；安全分流与鉴权测试不 Mock。
+- 测试目录按 `integration/`（FastAPI TestClient + 真实 MySQL）与 `unit/`（纯函数，不依赖网络/数据库）组织；集成测试前自动跑 yoyo 迁移并注入测试账号。策略类测试真实调用 DeepSeek（需在 `.env` 配置 `DEEPSEEK_API_KEY`），断言结构与行为、不断言具体文案；安全分流与鉴权测试不 Mock。最近一次实际运行结果（2026-09-27）：**53 passed, 0 failed（约 40s）**。
 
 ## 八、已知限制
 
@@ -124,8 +128,9 @@ voice_profile 由服务端按**安全要求 > 当前状态 > 用户表达偏好 
 - 三档 TTS 参数为建议初始值，不同机型引擎听感有差异，演示前建议真机调校。
 - 句级副语言特征依赖腾讯 ASR 实际返回，缺失时降级为纯文本判断（面板可查看 asr_features）。
 - 每轮 Prompt 仅注入最近 10 条历史消息，超长会话不做全量上下文。
-- 未实现的加分项：GAD-7 自评量表、回复「有帮助/无帮助」反馈、ASR 低置信度二次确认。
+- 未实现的加分项：GAD-7 自评量表、ASR 低置信度二次确认。
 - 语音风格编辑为会话级设置（存 `sessions.voice_profile_override`），未做全局用户级默认。
+- 已实现的加分项：回复「有帮助/无帮助」反馈（`PATCH /api/messages/{id}/feedback`，标记无帮助会把该 technique 加入会话拒绝记忆，影响后续策略）、会话删除级联清理、用户语音风格编辑、审计与日志脱敏；另有超出题目的 SSE 流式回复端点。详见 `docs/焦虑支持Agent-验收文档.md` 第 6 章。
 
 ## 九、与原项目（voice-psychology-research-demo）的复用与改动清单
 
