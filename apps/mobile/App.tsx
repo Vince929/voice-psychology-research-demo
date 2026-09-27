@@ -1,10 +1,10 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {BackHandler, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {BackHandler, Keyboard, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View} from 'react-native';
 
 import {Toast} from './src/components/Toast';
 import {colors} from './src/components/ui';
 import {ChatScreen} from './src/screens/ChatScreen';
-import {HistoryScreen, invalidateSessionsCache} from './src/screens/HistoryScreen';
+import {HistoryScreen} from './src/screens/HistoryScreen';
 import {LoginScreen} from './src/screens/LoginScreen';
 import {NewSessionScreen} from './src/screens/NewSessionScreen';
 import {SummaryScreen} from './src/screens/SummaryScreen';
@@ -31,6 +31,8 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [username, setUsername] = useState('');
   const [route, setRoute] = useState<Route>({name: 'login'});
+  // 最近打开的会话：聊天页保持挂载（隐藏而非卸载），返回时零重建、状态/滚动位置保留。
+  const [chatSessionId, setChatSessionId] = useState<number | null>(null);
   const [notice, setNotice] = useState<{message: string; tone: NoticeTone} | null>(null);
 
   const showNotice = useCallback((message: string, tone: NoticeTone = 'info') => {
@@ -38,7 +40,13 @@ export default function App() {
   }, []);
 
   const backToHistory = useCallback(() => {
+    Keyboard.dismiss();
     setRoute({name: 'history'});
+  }, []);
+
+  const openChat = useCallback((sessionId: number) => {
+    setChatSessionId(sessionId);
+    setRoute({name: 'chat', sessionId});
   }, []);
 
   useEffect(() => {
@@ -72,15 +80,16 @@ export default function App() {
   }, [route.name, backToHistory]);
 
   async function handleLogout() {
-    invalidateSessionsCache();
     await logout();
     setUsername('');
+    setChatSessionId(null);
     setRoute({name: 'login'});
     showNotice('已退出登录。', 'info');
   }
 
   const statusBarInset = StatusBar.currentHeight ?? 0;
   const canGoBack = route.name === 'chat' || route.name === 'summary' || route.name === 'newSession';
+  const signedIn = !booting && route.name !== 'login';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -117,38 +126,42 @@ export default function App() {
           }}
         />
       ) : null}
-      {!booting && route.name === 'history' ? (
-        <HistoryScreen
-          onOpenSession={sessionId => setRoute({name: 'chat', sessionId})}
-          onNewSession={() => setRoute({name: 'newSession'})}
-          onNotice={showNotice}
-        />
+      {signedIn ? (
+        <View style={route.name === 'history' ? styles.screenLayer : styles.screenHidden}>
+          <HistoryScreen
+            active={route.name === 'history'}
+            onOpenSession={openChat}
+            onNewSession={() => setRoute({name: 'newSession'})}
+            onNotice={showNotice}
+          />
+        </View>
       ) : null}
       {!booting && route.name === 'newSession' ? (
         <NewSessionScreen
           onCreated={session => {
-            invalidateSessionsCache();
-            setRoute({name: 'chat', sessionId: session.id});
+            openChat(session.id);
           }}
         />
       ) : null}
-      {!booting && route.name === 'chat' ? (
-        <ChatScreen
-          key={route.sessionId}
-          sessionId={route.sessionId}
-          onEnded={sessionId => {
-            invalidateSessionsCache();
-            setRoute({name: 'summary', sessionId});
-          }}
-          onOpenSummary={sessionId => setRoute({name: 'summary', sessionId})}
-          onNotice={showNotice}
-        />
+      {signedIn && chatSessionId !== null ? (
+        <View style={route.name === 'chat' ? styles.screenLayer : styles.screenHidden}>
+          <ChatScreen
+            key={chatSessionId}
+            sessionId={chatSessionId}
+            active={route.name === 'chat'}
+            onEnded={sessionId => {
+              setRoute({name: 'summary', sessionId});
+            }}
+            onOpenSummary={sessionId => setRoute({name: 'summary', sessionId})}
+            onNotice={showNotice}
+          />
+        </View>
       ) : null}
       {!booting && route.name === 'summary' ? (
         <SummaryScreen
           sessionId={route.sessionId}
           onBack={backToHistory}
-          onOpenChat={sessionId => setRoute({name: 'chat', sessionId})}
+          onOpenChat={openChat}
         />
       ) : null}
       <Toast message={notice?.message ?? null} tone={notice?.tone} onDismiss={() => setNotice(null)} />
@@ -158,6 +171,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safeArea: {flex: 1, backgroundColor: '#F6F2EA'},
+  screenLayer: {flex: 1},
+  screenHidden: {display: 'none'},
   header: {paddingHorizontal: 20, paddingBottom: 16, backgroundColor: '#153B36'},
   headerRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 34},
   backButton: {minWidth: 76, paddingVertical: 6},
