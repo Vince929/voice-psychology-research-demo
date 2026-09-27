@@ -5,6 +5,15 @@ import type {SessionInfo} from '../services/api';
 import {deleteSession, extractErrorDetail, listSessions} from '../services/api';
 import {Badge, PrimaryButton, colors, ui} from '../components/ui';
 
+// 模块级缓存：HistoryScreen 随路由条件渲染反复卸载/挂载，
+// 普通返回列表时直接复用缓存，避免每次重新拉取。
+let cachedSessions: SessionInfo[] | null = null;
+
+/** 会话列表需要失效的场景：新建会话、结束会话。删除会话在组件内主动 refresh。 */
+export function invalidateSessionsCache() {
+  cachedSessions = null;
+}
+
 export function HistoryScreen({
   onOpenSession,
   onNewSession,
@@ -14,14 +23,15 @@ export function HistoryScreen({
   onNewSession: () => void;
   onNotice: (message: string, tone?: 'success' | 'error' | 'info') => void;
 }) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessions, setSessions] = useState<SessionInfo[]>(cachedSessions ?? []);
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedSessions === null);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
     try {
       const items = await listSessions();
+      cachedSessions = items;
       setSessions(items);
       setError('');
     } catch (err) {
@@ -33,6 +43,9 @@ export function HistoryScreen({
   }, []);
 
   useEffect(() => {
+    if (cachedSessions !== null) {
+      return;
+    }
     void refresh();
   }, [refresh]);
 

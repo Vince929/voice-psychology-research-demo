@@ -4,11 +4,11 @@ import {BackHandler, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View}
 import {Toast} from './src/components/Toast';
 import {colors} from './src/components/ui';
 import {ChatScreen} from './src/screens/ChatScreen';
-import {HistoryScreen} from './src/screens/HistoryScreen';
+import {HistoryScreen, invalidateSessionsCache} from './src/screens/HistoryScreen';
 import {LoginScreen} from './src/screens/LoginScreen';
 import {NewSessionScreen} from './src/screens/NewSessionScreen';
 import {SummaryScreen} from './src/screens/SummaryScreen';
-import {loadStoredToken, logout, verifyToken} from './services/api';
+import {loadStoredToken, logout, verifyToken} from './src/services/api';
 
 type Route =
   | {name: 'login'}
@@ -72,6 +72,7 @@ export default function App() {
   }, [route.name, backToHistory]);
 
   async function handleLogout() {
+    invalidateSessionsCache();
     await logout();
     setUsername('');
     setRoute({name: 'login'});
@@ -124,13 +125,21 @@ export default function App() {
         />
       ) : null}
       {!booting && route.name === 'newSession' ? (
-        <NewSessionScreen onCreated={session => setRoute({name: 'chat', sessionId: session.id})} />
+        <NewSessionScreen
+          onCreated={session => {
+            invalidateSessionsCache();
+            setRoute({name: 'chat', sessionId: session.id});
+          }}
+        />
       ) : null}
       {!booting && route.name === 'chat' ? (
         <ChatScreen
           key={route.sessionId}
           sessionId={route.sessionId}
-          onEnded={sessionId => setRoute({name: 'summary', sessionId})}
+          onEnded={sessionId => {
+            invalidateSessionsCache();
+            setRoute({name: 'summary', sessionId});
+          }}
           onOpenSummary={sessionId => setRoute({name: 'summary', sessionId})}
           onNotice={showNotice}
         />
