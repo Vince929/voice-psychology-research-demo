@@ -1,23 +1,32 @@
-import json
 import logging
+import re
 from datetime import datetime
-from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import ValidationError
+from sqlalchemy.orm import Session
 
-from .cos_storage import audio_cos_storage
+from .analysis_services import (
+    ExternalServiceError,
+    extract_asr_features,
+    extract_audio_features,
+    transcribe_m4a,
+)
+from .auth import create_token, decode_token, get_current_user, verify_password
+from .config import UPLOAD_AUDIO_DIR
 from .database import get_db
-from .models import AnalysisTask, CollectionRecord, UploadSession
+from .models import ChatSession, Message, User
+from .schemas import LoginRequest, MessageTextRequest, SessionCreate
+from .strategy import _message_summary, _record_summary, process_turn
+from .summary import generate_summary
 
 app = FastAPI(
-    title="语音表达洞察演示 API",
-    description="语音采集与实验性表达洞察演示，不提供医疗诊断服务。",
-    version="0.2.0",
+    title="焦虑人群语音心理支持 Agent API",
+    description="非医疗性质的辅助性心理支持工具，不作诊断、不作治疗承诺、不替代专业援助。",
+    version="1.0.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -27,74 +36,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 logger = logging.getLogger(__name__)
 
-TASK_ACTIVE_STATUSES = {"pending", "transcribing", "analyzing"}
-MAX_MULTIPART_PARTS = 10_000
-COS_MIN_MULTIPART_PART_SIZE_BYTES = 1024 * 1024
+AUDIO_SUFFIX_PATTERN = re.compile(r"\.(m4a|aac)$", re.IGNORECASE)
 
 
-def task_summary(task: AnalysisTask | None) -> dict | None:
-    if task is None:
-        return None
-    return {
-        "id": task.id,
-        "status": task.status,
-        "attempt_count": task.attempt_count,
-        "max_attempts": task.max_attempts,
-        "failed_stage": task.failed_stage,
-        "error_code": task.error_code,
-        "error_message": task.error_message,
-        "created_at": task.created_at,
-        "started_at": task.started_at,
-        "finished_at": task.finished_at,
-    }
-
-
-def list_emotion_keywords(analysis_result: dict | None) -> list[str]:
-    if not isinstance(analysis_result, dict):
-        return []
-
-    stored_keywords = analysis_result.get("emotion_keywords")
-    if isinstance(stored_keywords, list) and all(isinstance(keyword, str) for keyword in stored_keywords):
-        return stored_keywords[:3]
-
-    # Records created before emotion_keywords was added still have the two scores below.
-    # Derive a compact display-only fallback so the list does not require historical re-analysis.
-    keywords: list[str] = []
-    vitality = analysis_result.get("vitality_score")
-    tension = analysis_result.get("tension_score")
-    dimensions = analysis_result.get("emotion_dimensions")
-    if isinstance(vitality, int):
-        keywords.append("兴奋" if vitality >= 65 else "低活力" if vitality <= 35 else "专注")
-    if isinstance(tension, int):
-        keywords.append("紧张" if tension >= 65 else "平静" if tension <= 35 else "稳定")
-    if isinstance(dimensions, dict) and "波动" in str(dimensions.get("stability", "")):
-        keywords.append("波动")
-    return list(dict.fromkeys(keywords))[:3]
-
-
-def record_summary(record: CollectionRecord) -> dict:
-    return {
-        "id": record.id,
-        "subject_id": record.subject_id,
-        "emotion_keywords": list_emotion_keywords(record.analysis_result),
-        "created_at": record.created_at,
-        "task": task_summary(record.analysis_task),
-    }
-
-
-def load_record(db: Session, record_id: int) -> CollectionRecord:
-    record = (
-        db.query(CollectionRecord)
-        .options(joinedload(CollectionRecord.analysis_task))
-        .filter(CollectionRecord.id == record_id)
-        .one_or_none()
+@app.exception_handler(ExternalServiceError)
+def external_service_error_handler(_request: Request, error: ExternalServiceError) -> JSONResponse:
+    return JSONResponse(
+        status_code=502,
+        content={"detail": str(error), "stage": error.stage, "retryable": error.retryable},
     )
-    if record is None:
-        raise HTTPException(status_code=404, detail="未找到该录音记录。")
-    return record
+
+
+def _session_summary(session: ChatSession) -> dict:
+    return {
+        "id": session.id,
+        "concern": session.concern,
+        "expression_preference": session.expression_preference,
+        "voice_reply_enabled": session.voice_reply_enabled,
+        "status": session.status,
+        "max_risk_level": session.max_risk_level,
+        "safety_triggered": session.safety_triggered,
+        "rejected_techniques": list(session.rejected_techniques or []),
+        "summary": session.summary,
+        "created_at": session.created_at,
+        "ended_at": session.ended_at,
+    }
+
+
+def _session_detail(session: ChatSession) -> dict:
+    records_by_message = {record.message_id: record for record in session.strategy_records}
+    messages = []
+    for message in session.messages:
+        item = _message_summary(message)
+        record = records_by_message.get(message.id)
+        item["strategy_record"] = _record_summary(record) if record else None
+        messages.append(item)
+    return {
+        **_session_summary(session),
+        "messages": messages,
+        "strategy_records": [_record_summary(record) for record in session.strategy_records],
+    }
+
+
+def _load_session(db: Session, user: User, session_id: int) -> ChatSession:
+    session = db.get(ChatSession, session_id)
+    # Ownership filter first: 404 for both "not found" and "someone else's" (no existence leak).
+    if session is None or session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="未找到该会话。")
+    return session
 
 
 @app.get("/api/health")
@@ -102,311 +93,183 @@ def health_check() -> dict[str, bool]:
     return {"ok": True}
 
 
-def upload_session_summary(session: UploadSession) -> dict:
-    return {
-        "upload_id": session.id,
-        "status": session.status,
-        "total_bytes": session.total_bytes,
-        "uploaded_parts": session.uploaded_parts or [],
-        "record_id": session.record_id,
-    }
+@app.post("/api/auth/login")
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
+    user = db.query(User).filter(User.username == payload.username.strip()).one_or_none()
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="用户名或密码不正确。")
+    return {"token": create_token(user), "username": user.username}
 
 
-def create_record_and_task(session: UploadSession, db: Session) -> CollectionRecord:
-    subject = session.subject
-    record = CollectionRecord(
-        subject_id=str(subject["subject_id"]),
-        age_group=subject.get("age_group"),
-        gender=subject.get("gender"),
-        language=subject.get("language", "普通话"),
-        recording_environment=subject.get("recording_environment"),
-        audio_path=session.object_key,
-        audio_filename=session.audio_filename,
-        audio_content_type=session.audio_content_type,
-        idempotency_key=session.idempotency_key,
-    )
-    db.add_all((record, AnalysisTask(record=record, max_attempts=3)))
-    db.flush()
-    session.status = "completed"
-    session.record_id = record.id
-    return record
+@app.post("/api/auth/logout")
+def logout(_user: User = Depends(get_current_user)) -> dict[str, bool]:
+    # Stateless JWT: the client clears the local token; endpoint kept for semantic completeness.
+    return {"ok": True}
 
 
-@app.post("/api/upload-sessions")
-def create_upload_session(payload: dict, db: Session = Depends(get_db)) -> dict:
-    subject = payload.get("subject") or {}
-    subject_id = str(subject.get("subject_id", "")).strip()
-    total_bytes = payload.get("total_bytes")
-    idempotency_key = str(payload.get("idempotency_key", "")).strip()
-    filename = str(payload.get("audio_filename") or "voice-sample.m4a")
-    content_type = str(payload.get("audio_content_type") or "audio/mp4")
-    suffix = Path(filename).suffix.lower() or ".m4a"
-    if not subject_id or not idempotency_key:
-        raise HTTPException(status_code=422, detail="匿名编号和请求幂等标识不能为空。")
-    if not isinstance(total_bytes, int) or total_bytes <= 0:
-        raise HTTPException(status_code=422, detail="录音文件大小必须为正整数。")
-    if suffix not in {".m4a", ".aac"}:
-        raise HTTPException(status_code=422, detail="仅支持 m4a 或 aac 格式的录音文件。")
-    restart_multipart_upload = payload.get("restart_multipart_upload") is True
-    session = db.get(UploadSession, str(payload.get("upload_id") or "")) if payload.get("upload_id") else None
-    if session is not None and session.idempotency_key != idempotency_key:
-        raise HTTPException(status_code=409, detail="上传会话与当前录音不匹配。")
-    if session is None:
-        session = db.query(UploadSession).filter(UploadSession.idempotency_key == idempotency_key).one_or_none()
-    if session is not None:
-        if session.total_bytes != total_bytes:
-            raise HTTPException(status_code=409, detail="上传会话中的文件大小与当前录音不匹配。")
-        if not restart_multipart_upload or session.status == "completed":
-            return upload_session_summary(session)
-        try:
-            audio_cos_storage.abort_multipart_upload(session.object_key, session.cos_upload_id)
-        except Exception:
-            logger.exception("Failed to abort invalid multipart upload session: upload_id=%s", session.id)
-        session.object_key, session.cos_upload_id = audio_cos_storage.create_multipart_upload(suffix, content_type)
-        session.uploaded_parts = []
-        db.commit()
-        db.refresh(session)
-        logger.info("Restarted multipart upload session: upload_id=%s", session.id)
-        return upload_session_summary(session)
-    object_key, cos_upload_id = audio_cos_storage.create_multipart_upload(suffix, content_type)
-    session = UploadSession(
-        id=str(uuid4()),
-        subject=subject,
-        audio_filename=filename,
-        audio_content_type=content_type,
-        total_bytes=total_bytes,
-        object_key=object_key,
-        cos_upload_id=cos_upload_id,
-        uploaded_parts=[],
-        idempotency_key=idempotency_key,
+@app.get("/api/auth/me")
+def me(user: User = Depends(get_current_user)) -> dict:
+    return {"id": user.id, "username": user.username}
+
+
+@app.post("/api/sessions")
+def create_session(
+    payload: SessionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    session = ChatSession(
+        user=user,
+        concern=payload.concern.strip(),
+        expression_preference=payload.expression_preference,
+        voice_reply_enabled=payload.voice_reply_enabled,
+        rejected_techniques=[],
     )
     db.add(session)
     db.commit()
     db.refresh(session)
-    return upload_session_summary(session)
+    return _session_summary(session)
 
 
-@app.get("/api/upload-sessions/{upload_id}")
-def get_upload_session(upload_id: str, db: Session = Depends(get_db)) -> dict:
-    session = db.get(UploadSession, upload_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="未找到上传会话。")
-    return upload_session_summary(session)
-
-
-@app.put("/api/upload-sessions/{upload_id}/parts/{part_number}")
-async def upload_session_part(upload_id: str, part_number: int, request: Request, db: Session = Depends(get_db)) -> dict:
-    session = db.get(UploadSession, upload_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="未找到上传会话。")
-    if session.status != "uploading":
-        raise HTTPException(status_code=409, detail="当前上传会话无法继续接收分片。")
-    if part_number < 1 or part_number > MAX_MULTIPART_PARTS:
-        raise HTTPException(status_code=422, detail="上传分片编号无效。")
-    parts = session.uploaded_parts or []
-    if any(part["part_number"] == part_number for part in parts):
-        return upload_session_summary(session)
-    body = await request.body()
-    if not body:
-        raise HTTPException(status_code=422, detail="上传分片不能为空。")
-    uploaded_bytes = sum(int(part["size"]) for part in parts)
-    if len(body) < COS_MIN_MULTIPART_PART_SIZE_BYTES and uploaded_bytes + len(body) < session.total_bytes:
-        raise HTTPException(status_code=422, detail="COS 要求除最后一块外每个分块至少为 1 MiB，请重新继续上传。")
-    try:
-        etag = audio_cos_storage.upload_part(session.object_key, session.cos_upload_id, part_number, body)
-    except Exception as error:
-        logger.exception("COS multipart part upload failed: upload_id=%s part_number=%s body_size=%s", upload_id, part_number, len(body))
-        raise HTTPException(status_code=502, detail="录音分块上传失败，请稍后重试。") from error
-    session.uploaded_parts = sorted([*parts, {"part_number": part_number, "etag": etag, "size": len(body)}], key=lambda part: part["part_number"])
-    db.commit()
-    db.refresh(session)
-    return upload_session_summary(session)
-
-
-@app.post("/api/upload-sessions/{upload_id}/complete")
-def complete_upload_session(upload_id: str, payload: dict, db: Session = Depends(get_db)) -> dict:
-    session = db.get(UploadSession, upload_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="未找到上传会话。")
-    if session.status == "completed" and session.record_id is not None:
-        record = load_record(db, session.record_id)
-        return {"record_id": record.id, "task": task_summary(record.analysis_task), "idempotent": True}
-    if session.status != "uploading":
-        raise HTTPException(status_code=409, detail="当前上传会话无法完成提交。")
-    part_count = payload.get("part_count")
-    parts = session.uploaded_parts or []
-    if not isinstance(part_count, int) or part_count < 1:
-        raise HTTPException(status_code=422, detail="上传分片数量必须为正整数。")
-    if [part["part_number"] for part in parts] != list(range(1, part_count + 1)):
-        raise HTTPException(status_code=409, detail="部分上传分片缺失，请继续上传后再提交。")
-    if sum(int(part["size"]) for part in parts) != session.total_bytes:
-        raise HTTPException(status_code=409, detail="已上传文件大小与原始录音不一致。")
-    try:
-        audio_cos_storage.complete_multipart_upload(session.object_key, session.cos_upload_id, parts)
-        record = create_record_and_task(session, db)
-        db.commit()
-    except Exception as error:
-        db.rollback()
-        logger.exception("COS multipart upload completion failed: upload_id=%s", upload_id)
-        raise HTTPException(status_code=502, detail="录音上传完成失败，请稍后重试。") from error
-    db.refresh(record)
-    db.refresh(record.analysis_task)
-    return {"record_id": record.id, "task": task_summary(record.analysis_task), "idempotent": False}
-
-
-@app.post("/api/records")
-def create_record(
-    audio: UploadFile = File(...),
-    subject: str = Form(...),
-    idempotency_key: str = Form(...),
-    db: Session = Depends(get_db),
-) -> dict:
-    try:
-        subject_data = json.loads(subject)
-    except json.JSONDecodeError as error:
-        raise HTTPException(status_code=422, detail="匿名信息格式无效。") from error
-
-    subject_id = str(subject_data.get("subject_id", "")).strip()
-    if not subject_id:
-        raise HTTPException(status_code=422, detail="匿名编号不能为空。")
-    if not idempotency_key.strip():
-        raise HTTPException(status_code=422, detail="请求幂等标识不能为空。")
-
-    existing = (
-        db.query(CollectionRecord)
-        .options(joinedload(CollectionRecord.analysis_task))
-        .filter(CollectionRecord.idempotency_key == idempotency_key)
-        .one_or_none()
-    )
-    if existing is not None:
-        return {"record_id": existing.id, "task": task_summary(existing.analysis_task), "idempotent": True}
-
-    suffix = Path(audio.filename or "voice-sample.m4a").suffix.lower() or ".m4a"
-    if suffix not in {".m4a", ".aac"}:
-        raise HTTPException(status_code=422, detail="仅支持 m4a 或 aac 格式的录音文件。")
-
-    audio_key = audio_cos_storage.upload(audio.file, suffix, audio.content_type or "audio/mp4")
-    record = CollectionRecord(
-        subject_id=subject_id,
-        age_group=subject_data.get("age_group"),
-        gender=subject_data.get("gender"),
-        language=subject_data.get("language", "普通话"),
-        recording_environment=subject_data.get("recording_environment"),
-        audio_path=audio_key,
-        audio_filename=audio.filename or f"voice-sample{suffix}",
-        audio_content_type=audio.content_type or "audio/mp4",
-        idempotency_key=idempotency_key,
-    )
-    task = AnalysisTask(record=record, max_attempts=3)
-    db.add_all((record, task))
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        audio_cos_storage.delete(audio_key)
-        existing = (
-            db.query(CollectionRecord)
-            .options(joinedload(CollectionRecord.analysis_task))
-            .filter(CollectionRecord.idempotency_key == idempotency_key)
-            .one()
-        )
-        return {"record_id": existing.id, "task": task_summary(existing.analysis_task), "idempotent": True}
-    except Exception:
-        db.rollback()
-        audio_cos_storage.delete(audio_key)
-        raise
-    db.refresh(record)
-    db.refresh(task)
-    return {"record_id": record.id, "task": task_summary(task), "idempotent": False}
-
-
-@app.get("/api/records")
-def list_records(db: Session = Depends(get_db)) -> list[dict]:
-    records = (
-        db.query(CollectionRecord)
-        .options(joinedload(CollectionRecord.analysis_task))
-        .order_by(CollectionRecord.created_at.desc())
+@app.get("/api/sessions")
+def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    sessions = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == user.id)
+        .order_by(ChatSession.created_at.desc())
         .all()
     )
-    return [record_summary(record) for record in records]
+    return [_session_summary(session) for session in sessions]
 
 
-@app.get("/api/records/{record_id}")
-def get_record(record_id: int, db: Session = Depends(get_db)) -> dict:
-    record = load_record(db, record_id)
-    return {
-        **record_summary(record),
-        "age_group": record.age_group,
-        "gender": record.gender,
-        "language": record.language,
-        "recording_environment": record.recording_environment,
-        "transcript": record.transcript,
-        "asr_result": record.asr_result,
-        "analysis_result": record.analysis_result,
-    }
+@app.get("/api/sessions/{session_id}")
+def get_session(
+    session_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    return _session_detail(_load_session(db, user, session_id))
 
 
-@app.get("/api/records/{record_id}/audio")
-def get_audio(record_id: int, db: Session = Depends(get_db)) -> StreamingResponse:
-    record = load_record(db, record_id)
-    return StreamingResponse(audio_cos_storage.stream(record.audio_path), media_type=record.audio_content_type)
+@app.post("/api/sessions/{session_id}/messages")
+async def post_message(
+    session_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    session = _load_session(db, user, session_id)
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="该会话已结束，无法继续发送消息。")
 
+    content_type = request.headers.get("content-type", "")
+    text: str
+    asr_features = None
+    audio_path: str | None = None
 
-@app.post("/api/records/{record_id}/analysis/retry")
-def retry_analysis(record_id: int, db: Session = Depends(get_db)) -> dict:
-    record = load_record(db, record_id)
-    task = record.analysis_task
-    if task is None:
-        task = AnalysisTask(record_id=record.id, max_attempts=3)
-        db.add(task)
-    elif task.status in TASK_ACTIVE_STATUSES:
-        raise HTTPException(status_code=409, detail="当前录音正在转录或分析中。")
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("audio")
+        if not isinstance(upload, UploadFile):
+            raise HTTPException(status_code=422, detail="语音消息必须包含 audio 文件。")
+        audio_bytes = await upload.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=422, detail="音频文件不能为空。")
+        text, asr_features, audio_path = await _process_voice_message(session.id, upload, audio_bytes)
     else:
-        task.status = "pending"
-        task.attempt_count = 0
-        task.next_retry_at = None
-        task.worker_id = None
-        task.lease_expires_at = None
-        task.started_at = None
-        task.finished_at = None
-        task.cancel_requested_at = None
-        task.failed_stage = None
-        task.error_code = None
-        task.error_message = None
+        try:
+            body = await request.json()
+        except Exception as error:
+            raise HTTPException(status_code=422, detail="请求体必须是合法 JSON。") from error
+        try:
+            payload = MessageTextRequest.model_validate(body)
+        except ValidationError as error:
+            raise HTTPException(
+                status_code=422, detail=f"消息内容不合法：{error.errors()[0]['msg']}"
+            ) from error
+        text = payload.text.strip()
+
+    result = process_turn(db, session, text, asr_features=asr_features, audio_path=audio_path)
     db.commit()
-    db.refresh(task)
-    return {"record_id": record.id, "task": task_summary(task)}
+    return result
 
 
-@app.post("/api/records/{record_id}/analysis/cancel")
-def cancel_analysis(record_id: int, db: Session = Depends(get_db)) -> dict:
-    record = load_record(db, record_id)
-    task = record.analysis_task
-    if task is None or task.status not in TASK_ACTIVE_STATUSES:
-        raise HTTPException(status_code=409, detail="当前没有可取消的分析任务。")
-    task.cancel_requested_at = datetime.utcnow()
-    if task.status == "pending":
-        task.status = "cancelled"
-        task.finished_at = datetime.utcnow()
+async def _process_voice_message(session_id: int, upload: UploadFile, audio_bytes: bytes) -> tuple[str, dict, str]:
+    transcript, asr_result, _request_id = transcribe_m4a(audio_bytes)
+    if not transcript or not transcript.strip():
+        raise ExternalServiceError(
+            "transcription", "未能从这段录音中识别出内容，请靠近麦克风重新录制后重试。", False
+        )
+    asr_features = extract_asr_features(transcript, asr_result)
+    loudness = extract_audio_features(audio_bytes)
+    if loudness:
+        asr_features["audio_features"] = loudness
+
+    match = AUDIO_SUFFIX_PATTERN.search(upload.filename or "")
+    suffix = match.group(0) if match else ".m4a"
+    directory = UPLOAD_AUDIO_DIR / str(session_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    saved_name = f"{uuid4().hex}{suffix}"
+    relative_path = f"{session_id}/{saved_name}"
+    (directory / saved_name).write_bytes(audio_bytes)
+    return transcript, asr_features, relative_path
+
+
+@app.get("/api/messages/{message_id}/audio")
+def get_message_audio(
+    message_id: int,
+    request: Request,
+    token: str = "",
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    # The native player cannot attach headers, so a ?token= query fallback is allowed.
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Bearer ") and not token:
+        token = authorization[len("Bearer ") :].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="请先登录后再访问。")
+    payload = decode_token(token)
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, ValueError, TypeError) as error:
+        raise HTTPException(status_code=401, detail="登录状态无效，请重新登录。") from error
+
+    message = db.get(Message, message_id)
+    if message is None or message.audio_path is None:
+        raise HTTPException(status_code=404, detail="未找到该语音消息。")
+    if message.session is None or message.session.user_id != user_id:
+        raise HTTPException(status_code=404, detail="未找到该语音消息。")
+
+    audio_file = (UPLOAD_AUDIO_DIR / message.audio_path).resolve()
+    if not str(audio_file).startswith(str(UPLOAD_AUDIO_DIR.resolve())) or not audio_file.is_file():
+        raise HTTPException(status_code=404, detail="未找到该语音消息。")
+    return FileResponse(audio_file, media_type="audio/mp4")
+
+
+@app.post("/api/sessions/{session_id}/end")
+def end_session(
+    session_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    session = _load_session(db, user, session_id)
+    if session.status == "ended" and session.summary:
+        return {"summary": session.summary, "idempotent": True}
+    if session.status == "ended" and not session.summary:
+        raise HTTPException(status_code=409, detail="该会话总结生成失败过，请重新生成。")
+
+    summary = generate_summary(session)
+    session.summary = summary
+    session.status = "ended"
+    session.ended_at = datetime.utcnow()
     db.commit()
-    db.refresh(task)
-    return {"record_id": record.id, "task": task_summary(task)}
+    return {"summary": summary, "idempotent": False}
 
 
-@app.delete("/api/records/{record_id}")
-def delete_record(record_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
-    record = load_record(db, record_id)
-    audio_cos_storage.delete(record.audio_path)
-    db.delete(record)
+@app.delete("/api/sessions/{session_id}")
+def delete_session(
+    session_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, bool]:
+    session = _load_session(db, user, session_id)
+    for message in session.messages:
+        if message.audio_path:
+            audio_file = UPLOAD_AUDIO_DIR / message.audio_path
+            if audio_file.is_file():
+                audio_file.unlink()
+    db.delete(session)
     db.commit()
-    return {"deleted": True}
-
-
-@app.delete("/api/subjects/{subject_id}")
-def delete_subject_records(subject_id: str, db: Session = Depends(get_db)) -> dict[str, int]:
-    records = db.query(CollectionRecord).filter(CollectionRecord.subject_id == subject_id).all()
-    for record in records:
-        audio_cos_storage.delete(record.audio_path)
-        db.delete(record)
-    db.commit()
-    return {"deleted_count": len(records)}
+    return {"ok": True}

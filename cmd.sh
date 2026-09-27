@@ -28,23 +28,27 @@ usage() {
 Usage: ./cmd.sh [command]
 
   (no args), api       Start the FastAPI service at http://127.0.0.1:8000
-  worker               Start the persistent ASR and AI analysis worker
   mobile, android      Build, install and start the Android app in emulator mode
   usb                  Configure USB port reverse and start the Android app on a device
   metro                Start the React Native Metro server only
   package, apk         Build the Android release APK
   db:migrate           Apply pending versioned SQL migrations with Yoyo
+  seed                 Insert the two acceptance test accounts (seed.sql)
+  test                 Run the pytest suite (apps/api/tests)
   help, -h, --help     Show this help
 EOF
 }
 
-migrate_database() {
+require_venv() {
   if [[ ! -x "$API_DIR/.venv/bin/python" ]]; then
-    echo "Backend virtual environment is missing: $API_DIR/.venv"
-    echo "Run: python3 -m venv apps/api/.venv && apps/api/.venv/bin/pip install -e apps/api"
+    echo "Backend virtual environment is missing: $API_DIR/.venv" >&2
+    echo "Run: python3 -m venv apps/api/.venv && apps/api/.venv/bin/pip install -e 'apps/api[dev]'" >&2
     exit 1
   fi
+}
 
+migrate_database() {
+  require_venv
   load_database_url
   local yoyo_database_url="${DATABASE_URL/mysql+pymysql:/mysql:}"
   (
@@ -53,16 +57,40 @@ migrate_database() {
   )
 }
 
-start_worker() {
-  if [[ ! -x "$API_DIR/.venv/bin/python" ]]; then
-    echo "Backend virtual environment is missing: $API_DIR/.venv"
-    echo "Run: python3 -m venv apps/api/.venv && apps/api/.venv/bin/pip install -e apps/api"
-    exit 1
-  fi
+seed_accounts() {
+  require_venv
+  load_database_url
+  (
+    cd "$API_DIR"
+    .venv/bin/python -c '
+import pymysql
+from urllib.parse import urlparse
+from app.config import DATABASE_URL
+parsed = urlparse(DATABASE_URL.replace("mysql+pymysql://", "mysql://"))
+sql = open("seed.sql", encoding="utf-8").read()
+connection = pymysql.connect(
+    host=parsed.hostname,
+    port=parsed.port or 3306,
+    user=parsed.username,
+    password=parsed.password,
+    database=parsed.path.lstrip("/"),
+    charset="utf8mb4",
+    autocommit=True,
+)
+with connection.cursor() as cursor:
+    cursor.execute(sql)
+print("seed accounts ready: demo1 / demo2 (password: Passw0rd!)")
+'
+  )
+}
 
-  migrate_database
-  cd "$API_DIR"
-  exec .venv/bin/python -m app.worker
+run_tests() {
+  require_venv
+  load_database_url
+  (
+    cd "$API_DIR"
+    exec .venv/bin/python -m pytest tests -v
+  )
 }
 
 build_android_apk() {
@@ -80,12 +108,7 @@ build_android_apk() {
 }
 
 start_api() {
-  if [[ ! -x "$API_DIR/.venv/bin/python" ]]; then
-    echo "Backend virtual environment is missing: $API_DIR/.venv"
-    echo "Run: python3 -m venv apps/api/.venv && apps/api/.venv/bin/pip install -e apps/api"
-    exit 1
-  fi
-
+  require_venv
   migrate_database
   cd "$API_DIR"
   exec .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -95,8 +118,11 @@ case "${1:-api}" in
   api)
     start_api
     ;;
-  worker)
-    start_worker
+  seed)
+    seed_accounts
+    ;;
+  test)
+    run_tests
     ;;
   mobile|android)
     cd "$PROJECT_ROOT"
