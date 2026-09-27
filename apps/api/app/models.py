@@ -25,6 +25,9 @@ class ChatSession(Base):
     concern: Mapped[str] = mapped_column(String(255))
     expression_preference: Mapped[str] = mapped_column(String(16))  # 'gentle' | 'concise'
     voice_reply_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # User-edited voice profile (bonus feature). NULL = server-derived automatically;
+    # ignored whenever safety requirements or a high/ambiguous risk demand calm_slow.
+    voice_profile_override: Mapped[str | None] = mapped_column(String(32), nullable=True)
     rejected_techniques: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # 'active' | 'ended'
     max_risk_level: Mapped[str] = mapped_column(String(16), default="normal")
@@ -77,7 +80,23 @@ class StrategyRecord(Base):
     avoided_techniques: Mapped[list] = mapped_column(JSON)
     is_safety_escalation: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(8))  # 'rule' | 'llm'
+    # Explicit user rating of the generated reply; NULL means not rated yet.
+    feedback: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped[ChatSession] = relationship(back_populates="strategy_records")
     message: Mapped[Message] = relationship(back_populates="strategy_record")
+
+
+class AuditLog(Base):
+    """Append-only audit trail. Stores actions + structured metadata only;
+    message content and transcripts are deliberately never written here."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    session_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -1,13 +1,19 @@
-"""Shared fixtures: apply migrations, inject the two acceptance accounts, build a client."""
+"""Shared integration-test fixtures.
+
+Integration tests exercise FastAPI routes backed by the configured MySQL database.
+They apply migrations and create the two acceptance-test accounts.
+"""
 
 import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.integration
 from yoyo import get_backend, read_migrations
 
-API_DIR = Path(__file__).resolve().parent.parent
+API_DIR = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = API_DIR.parent.parent
 sys.path.insert(0, str(API_DIR))
 
@@ -77,20 +83,22 @@ def demo2_token(client):
 
 
 @pytest.fixture()
-def auth_client(client, demo1_token):
-    client.headers.update({"Authorization": f"Bearer {demo1_token}"})
-    yield client
-    client.headers.pop("Authorization", None)
+def auth_client(demo1_token):
+    authenticated = TestClient(app)
+    authenticated.headers.update({"Authorization": f"Bearer {demo1_token}"})
+    return authenticated
 
 
 @pytest.fixture()
-def active_session(auth_client) -> dict:
+def active_session(auth_client):
     response = auth_client.post(
         "/api/sessions",
         json={"concern": "工作压力", "expression_preference": "gentle", "voice_reply_enabled": True},
     )
     assert response.status_code == 200, response.text
-    return response.json()
+    yield response.json()
+    # Some tests delete it themselves already; a 404 here is fine.
+    auth_client.delete(f"/api/sessions/{response.json()['id']}")
 
 
 def send_message(client_with_auth: TestClient, session_id: int, text: str):

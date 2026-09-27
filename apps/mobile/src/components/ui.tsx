@@ -64,6 +64,7 @@ export const ui = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#BFD4C8',
     backgroundColor: '#F8FBF8',
+    paddingHorizontal: 16,
   },
   secondaryButtonText: {fontSize: 14, fontWeight: '800', color: colors.primary},
   errorText: {fontSize: 13, lineHeight: 19, color: colors.danger, fontWeight: '700'},

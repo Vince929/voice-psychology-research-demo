@@ -5,6 +5,16 @@ import type {SessionInfo} from '../services/api';
 import {deleteSession, extractErrorDetail, listSessions} from '../services/api';
 import {Badge, PrimaryButton, colors, ui} from '../components/ui';
 
+function riskLabel(riskLevel: string): string {
+  if (riskLevel === 'high') {
+    return '高风险';
+  }
+  if (riskLevel === 'ambiguous') {
+    return '风险待确认';
+  }
+  return '风险正常';
+}
+
 export function HistoryScreen({
   active,
   onOpenSession,
@@ -77,7 +87,7 @@ export function HistoryScreen({
             </View>
             <View style={{flexDirection: 'row', gap: 6, flexWrap: 'wrap'}}>
               <Badge
-                text={`最高风险 ${session.max_risk_level}`}
+                text={riskLabel(session.max_risk_level)}
                 tone={session.max_risk_level === 'high' ? 'danger' : session.max_risk_level === 'ambiguous' ? 'warn' : 'ok'}
               />
               {session.safety_triggered ? <Badge text="触发过安全分流" tone="danger" /> : null}

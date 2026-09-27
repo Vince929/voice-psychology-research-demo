@@ -3,10 +3,17 @@
 Order per turn: deterministic safety rules -> (optionally) one DeepSeek call
 with strict Pydantic validation and one corrective retry -> deterministic
 voice-profile derivation -> persistence. High-risk turns never reach the LLM.
+
+Everything is driven by `turn_event_stream`, an event generator that yields
+incremental `delta` events (streamed reply fragments) while the LLM runs and
+finishes with one `result` event holding the persisted turn payload.
+`process_turn` is a thin non-streaming wrapper kept for tests and the legacy
+non-stream endpoint.
 """
 
 import json
 import logging
+import os
 import re
 from typing import Any, Callable
 
@@ -17,7 +24,8 @@ from .analysis_services import ExternalServiceError, call_deepseek_json
 from .models import ChatSession, Message, StrategyRecord
 from .rejection import build_avoided_techniques, detect_rejected_technique, remember_rejection
 from .schemas import StrategyLLMOutput
-from .tts_profiles import resolve_voice_profile, tts_params_for
+from .tts_profiles import resolve_turn_voice_profile, tts_params_for
+from .audit import record_audit
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +70,44 @@ def process_turn(
     llm_call: Callable[..., Any] | None = None,
 ) -> dict:
     """Run the full per-turn pipeline. Adds message/strategy rows (caller commits)."""
-    if llm_call is None:
+    result: dict | None = None
+    for event in turn_event_stream(
+        db, session, text, asr_features=asr_features, audio_path=audio_path, llm_call=llm_call
+    ):
+        if event["type"] == "result":
+            result = event["result"]
+    assert result is not None  # the generator always ends with a result or raises
+    return result
+
+
+def turn_event_stream(
+    db,
+    session: ChatSession,
+    text: str,
+    *,
+    asr_features: dict | None = None,
+    audio_path: str | None = None,
+    llm_call: Callable[..., Any] | None = None,
+    stream_call: Callable[..., Any] | None = None,
+):
+    """Event generator behind one conversation turn.
+
+    Yields, in order:
+      {"type": "delta", "text": str}   -- streamed fragment of the assistant reply
+                                          (only when `stream_call` is provided)
+      {"type": "reset", "reason": str}  -- streamed fragments are invalidated,
+                                          a corrective retry is regenerating
+      {"type": "result", "result": dict} -- final authoritative payload, same
+                                          shape as the non-streaming endpoint
+
+    Non-streaming callers (process_turn, tests) simply ignore delta events.
+    Raises ExternalServiceError on failure, never silently degrades.
+    """
+    if llm_call is None and stream_call is None:
         llm_call = call_deepseek_json
     rule_risk = safety.assess_text_risk(text)
     if rule_risk == "high":
-        return _persist_turn(
+        yield {"type": "result", "result": _persist_turn(
             db, session, text, audio_path=audio_path, asr_features=asr_features,
             reply=safety.SAFETY_ESCALATION_REPLY,
             anxiety_level="uncertain", risk_level="high",
@@ -76,9 +117,10 @@ def process_turn(
             technique_reason="确定性关键词规则命中明确自伤/自杀或用药咨询风险，跳过普通支持策略",
             response_constraints={"max_sentences": 6, "ask_one_question_only": False},
             source="rule", is_safety_escalation=True,
-        )
+        )}
+        return
     if rule_risk == "ambiguous":
-        return _persist_turn(
+        yield {"type": "result", "result": _persist_turn(
             db, session, text, audio_path=audio_path, asr_features=asr_features,
             reply=safety.SAFETY_CONFIRMATION_REPLY,
             anxiety_level="uncertain", risk_level="ambiguous",
@@ -88,7 +130,8 @@ def process_turn(
             technique_reason="确定性关键词规则命中模糊风险表述，先安全确认再继续",
             response_constraints={"max_sentences": 2, "ask_one_question_only": True},
             source="rule", is_safety_escalation=False,
-        )
+        )}
+        return
 
     # Normal path: rejection regex first (pre-LLM), then a single LLM call chain.
     regex_rejected = detect_rejected_technique(text)
@@ -97,11 +140,19 @@ def process_turn(
 
     history = _build_history(session)
     user_content = _build_user_content(session, history, text, asr_features)
-    output, saw_non_normal_risk, last_raw = _call_llm_validated(llm_call, user_content, session)
+    # Opt-in debug: dump the full per-turn prompt schema (incl. asr_features)
+    # to the API console. Off by default so conversation content never lands
+    # in logs; set DEBUG_LLM_PROMPT=1 in apps/api/.env to enable.
+    if os.environ.get("DEBUG_LLM_PROMPT") == "1":
+        logger.info("LLM prompt: %s", user_content)
+    if stream_call is not None:
+        output = yield from _stream_llm_validated(stream_call, user_content, session)
+    else:
+        output, _saw_non_normal_risk, _last_raw = _call_llm_validated(llm_call, user_content, session)
 
     # Layer-2 risk upgrade by the LLM: still fixed replies, LLM never authors safety text.
     if output.risk_level == "high":
-        return _persist_turn(
+        yield {"type": "result", "result": _persist_turn(
             db, session, text, audio_path=audio_path, asr_features=asr_features,
             reply=safety.SAFETY_ESCALATION_REPLY,
             anxiety_level=output.anxiety_level, risk_level="high",
@@ -111,9 +162,10 @@ def process_turn(
             technique_reason=f"LLM 结构化判断将风险升级为 high（{output.technique_reason}）",
             response_constraints={"max_sentences": 6, "ask_one_question_only": False},
             source="llm", is_safety_escalation=True,
-        )
+        )}
+        return
     if output.risk_level == "ambiguous":
-        return _persist_turn(
+        yield {"type": "result", "result": _persist_turn(
             db, session, text, audio_path=audio_path, asr_features=asr_features,
             reply=safety.SAFETY_CONFIRMATION_REPLY,
             anxiety_level=output.anxiety_level, risk_level="ambiguous",
@@ -123,7 +175,8 @@ def process_turn(
             technique_reason=f"LLM 结构化判断将风险升级为 ambiguous（{output.technique_reason}）",
             response_constraints={"max_sentences": 2, "ask_one_question_only": True},
             source="llm", is_safety_escalation=False,
-        )
+        )}
+        return
 
     # LLM-channel rejection detection.
     if output.user_rejected_technique:
@@ -132,8 +185,7 @@ def process_turn(
     # Post check on response constraints; truncate as the final safety net.
     reply_text = _enforce_reply_constraints(output)
 
-    voice_profile = resolve_voice_profile(output.anxiety_level, session.expression_preference, False)
-    return _persist_turn(
+    yield {"type": "result", "result": _persist_turn(
         db, session, text, audio_path=audio_path, asr_features=asr_features,
         reply=reply_text,
         anxiety_level=output.anxiety_level, risk_level="normal",
@@ -143,8 +195,7 @@ def process_turn(
         technique_reason=output.technique_reason,
         response_constraints=output.response_constraints.model_dump(),
         source="llm", is_safety_escalation=False,
-        voice_profile=voice_profile,
-    )
+    )}
 
 
 def _matched_signal(keywords: tuple[str, ...], text: str) -> str:
@@ -212,6 +263,7 @@ def _call_llm_validated(
             output = StrategyLLMOutput.model_validate(raw)
         except ValidationError as error:
             _last_error = _format_validation_error(error)
+            logger.warning("turn llm output validation failed (attempt %d): %s", attempt + 1, _last_error)
             continue
         if raw.get("risk_level") in ("ambiguous", "high"):
             saw_non_normal_risk = True
@@ -219,6 +271,70 @@ def _call_llm_validated(
             _last_error = f"technique={output.technique} 已被用户在本次会话中拒绝，不得选用"
             continue
         return output, saw_non_normal_risk, last_raw
+
+    # Layer-3 fallback: never fabricate a normal reply after failed validation.
+    if saw_non_normal_risk:
+        raise ExternalServiceError(
+            "llm",
+            "本轮输入可能存在安全风险但 AI 输出校验未通过，已按安全确认处理。请稍后重试。",
+            False,
+        )
+    raise ExternalServiceError(
+        "llm",
+        "AI 服务输出未通过结构化校验，本轮回复未生成，请稍后重试。",
+        False,
+    )
+
+
+def _stream_llm_validated(
+    stream_call: Callable[..., Any], user_content: str, session: ChatSession
+) -> StrategyLLMOutput:
+    """Streaming counterpart of _call_llm_validated.
+
+    Consumes the streaming LLM call, re-yielding its reply-text deltas as
+    `delta` events; on a failed validation emits one `reset` event (telling
+    the client to drop the fragments it showed) before the corrective retry.
+    Returns the validated StrategyLLMOutput; raises ExternalServiceError when
+    the retry still fails, mirroring _call_llm_validated exactly.
+    """
+    last_raw: str | None = None
+    saw_non_normal_risk = False
+    _last_error = ""
+    for attempt in range(2):
+        followup = None
+        if attempt == 1:
+            yield {"type": "reset", "reason": "回复重新生成中…"}
+            followup = [
+                {"role": "assistant", "content": last_raw or "{}"},
+                {"role": "user", "content": (
+                    "上一次输出未通过校验，存在以下问题：" + _last_error +
+                    "。请重新输出完整且合法的 JSON，所有字段必须符合要求；"
+                    "禁止选用 rejected_techniques 中的方法；回复不得超过 response_constraints.max_sentences 句且最多一个问题。"
+                )},
+            ]
+        stream = stream_call(SYSTEM_PROMPT, user_content, followup)
+        raw = None
+        while True:
+            try:
+                delta = next(stream)
+            except StopIteration as stop:
+                raw, _request_id = stop.value
+                break
+            if delta:
+                yield {"type": "delta", "text": delta}
+        last_raw = json.dumps(raw, ensure_ascii=False)
+        try:
+            output = StrategyLLMOutput.model_validate(raw)
+        except ValidationError as error:
+            _last_error = _format_validation_error(error)
+            logger.warning("turn llm output validation failed (stream attempt %d): %s", attempt + 1, _last_error)
+            continue
+        if raw.get("risk_level") in ("ambiguous", "high"):
+            saw_non_normal_risk = True
+        if output.technique in (session.rejected_techniques or []):
+            _last_error = f"technique={output.technique} 已被用户在本次会话中拒绝，不得选用"
+            continue
+        return output
 
     # Layer-3 fallback: never fabricate a normal reply after failed validation.
     if saw_non_normal_risk:
@@ -280,11 +396,11 @@ def _persist_turn(
     is_safety_escalation: bool,
     audio_path: str | None = None,
     asr_features: dict | None = None,
-    voice_profile: str | None = None,
 ) -> dict:
     user_message = Message(session=session, role="user", content=text, audio_path=audio_path, asr_features=asr_features)
-    if voice_profile is None:
-        voice_profile = "calm_slow"
+    voice_profile, override_applied = resolve_turn_voice_profile(
+        anxiety_level, risk_level, session.expression_preference, session.voice_profile_override
+    )
     assistant_message = Message(session=session, role="assistant", content=reply)
     db.add_all((user_message, assistant_message))
     db.flush()
@@ -301,13 +417,19 @@ def _persist_turn(
         technique_reason=technique_reason,
         response_constraints=response_constraints,
         voice_profile=voice_profile,
-        tts_params=tts_params_for(voice_profile),
+        tts_params=tts_params_for(voice_profile, override_applied),
         avoided_techniques=avoided,
         is_safety_escalation=is_safety_escalation,
         source=source,
     )
     db.add(record)
     _bump_risk(session, risk_level, is_safety_escalation)
+    if is_safety_escalation:
+        # Audit trail: enums and metadata only, never message content.
+        record_audit(
+            db, user_id=session.user_id, action="safety_escalation", session_id=session.id,
+            detail={"technique": technique, "risk_level": risk_level, "source": source},
+        )
     db.flush()
 
     return {
@@ -344,5 +466,6 @@ def _record_summary(record: StrategyRecord) -> dict:
         "avoided_techniques": record.avoided_techniques,
         "is_safety_escalation": record.is_safety_escalation,
         "source": record.source,
+        "feedback": record.feedback,
         "created_at": record.created_at,
     }

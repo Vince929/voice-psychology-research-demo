@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,11 +26,11 @@ import type {
 import {
   endSession,
   extractErrorDetail,
-  getAudioUrl,
   getSession,
   streamAudioMessage,
   streamTextMessage,
   streamVoiceMessage,
+  submitReplyFeedback,
   updateSessionPreferences,
 } from '../services/api';
 import {
@@ -37,8 +38,6 @@ import {
   requestMicrophonePermission,
   startRecording,
   stopRecording,
-  stopRemoteAudio,
-  playRemoteAudio,
 } from '../services/recorder';
 import {initTtsEngine, speakWithProfile, stopSpeaking} from '../services/tts';
 
@@ -55,6 +54,33 @@ const VOICE_STYLE_CHOICES: Array<{label: string; value: VoiceProfileName | null}
   {label: '温和正常', value: 'warm_normal'},
   {label: '简洁明快', value: 'concise_direct'},
 ];
+
+/** Parameters used only after replay priority checks allow the user's choice. */
+const REPLAY_TTS_PARAMS: Record<VoiceProfileName, TtsParams> = {
+  calm_slow: {voice_profile: 'calm_slow', rate: 0.7, pitch: 0.9, inter_sentence_pause_ms: 800},
+  warm_normal: {voice_profile: 'warm_normal', rate: 1.0, pitch: 1.0, inter_sentence_pause_ms: 400},
+  concise_direct: {voice_profile: 'concise_direct', rate: 1.15, pitch: 1.0, inter_sentence_pause_ms: 200},
+};
+
+function replayParamsFor(message: MessageInfo, userChoice: VoiceProfileName | null | undefined): TtsParams {
+  const record = message.strategy_record;
+  const recordedParams = record?.tts_params ?? FALLBACK_TTS_PARAMS;
+  // Keep the same priority as the server: safety requirement > current state
+  // (captured on this reply's strategy record) > user preference > default.
+  if (
+    record?.is_safety_escalation ||
+    record?.risk_level === 'high' ||
+    record?.risk_level === 'ambiguous' ||
+    record?.anxiety_level === 'high'
+  ) {
+    return REPLAY_TTS_PARAMS.calm_slow;
+  }
+  return userChoice ? REPLAY_TTS_PARAMS[userChoice] : recordedParams;
+}
+
+// Android `height` mode: lower values lift the entire bottom dock further above
+// the IME. Tune this per device if the input row is still partially obscured.
+const ANDROID_KEYBOARD_VERTICAL_OFFSET = 0;
 
 export function ChatScreen({
   sessionId,
@@ -77,12 +103,11 @@ export function ChatScreen({
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [ttsPlayingId, setTtsPlayingId] = useState<number | null>(null);
-  const [audioPlayingId, setAudioPlayingId] = useState<number | null>(null);
   const [ending, setEnding] = useState(false);
   const [awaitingReply, setAwaitingReply] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [savingStyle, setSavingStyle] = useState(false);
-  const [error, setError] = useState('');
+  const [feedbackSavingId, setFeedbackSavingId] = useState<number | null>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
   // Typewriter pump: LLM deltas land in the buffer, a timer releases them at
   // a readable pace (accelerating when the backlog grows so we never fall
@@ -111,7 +136,11 @@ export function ChatScreen({
         const lastRecord = data.strategy_records[data.strategy_records.length - 1] ?? null;
         setLatestRecord(lastRecord);
       })
-      .catch(err => setError(extractErrorDetail(err)));
+      .catch(err => {
+        if (!cancelled) {
+          onNotice(`加载会话失败：${extractErrorDetail(err)}`, 'error');
+        }
+      });
     void initTtsEngine().then(available => {
       if (!available) {
         onNotice('当前设备缺少中文语音合成引擎，语音播放不可用。', 'error');
@@ -120,7 +149,6 @@ export function ChatScreen({
     return () => {
       cancelled = true;
       void stopSpeaking();
-      void stopRemoteAudio();
     };
   }, [sessionId, active, onNotice]);
 
@@ -211,33 +239,16 @@ export function ChatScreen({
     }
     await stopSpeaking();
     setTtsPlayingId(message.id);
-    const ttsParams = params ?? message.strategy_record?.tts_params ?? FALLBACK_TTS_PARAMS;
-    try {
-      await speakWithProfile(message.content, ttsParams);
+  // Auto-play passes the server-resolved params explicitly. Manual replay
+  // recomputes through the same priority order rather than letting the UI
+  // override a safety or high-anxiety reply.
+  const ttsParams = params ?? replayParamsFor(message, detail?.voice_profile_override);
+  try {
+    await speakWithProfile(message.content, ttsParams);
     } catch (err) {
       onNotice(err instanceof Error ? err.message : '语音播放失败。', 'error');
     } finally {
       setTtsPlayingId(current => (current === message.id ? null : current));
-    }
-  }
-
-  async function playUserAudio(message: MessageInfo) {
-    if (!message.audio_url) {
-      return;
-    }
-    if (audioPlayingId === message.id) {
-      await stopRemoteAudio();
-      setAudioPlayingId(null);
-      return;
-    }
-    await stopRemoteAudio();
-    setAudioPlayingId(message.id);
-    try {
-      await playRemoteAudio(getAudioUrl(message.id));
-    } catch (err) {
-      onNotice(recordingErrorMessage(err), 'error');
-    } finally {
-      setAudioPlayingId(null);
     }
   }
 
@@ -263,7 +274,6 @@ export function ChatScreen({
       return;
     }
     setSending(true);
-    setError('');
     setInputText('');
     setStreamingText('');
     const pendingId = appendPendingUserMessage(text);
@@ -277,10 +287,7 @@ export function ChatScreen({
     } catch (err) {
       removePendingUserMessage(pendingId);
       const message = extractErrorDetail(err);
-      setError(message);
       setInputText(text);
-      // The inline error renders above the message list and is easy to miss
-      // when scrolled to the bottom, so surface it as a toast as well.
       onNotice(`发送失败：${message}`, 'error');
     } finally {
       stopStreamPump();
@@ -293,7 +300,6 @@ export function ChatScreen({
     if (sending || recorderActiveRef.current) {
       return;
     }
-    setError('');
     if (!await requestMicrophonePermission()) {
       onNotice('需要麦克风权限后才能录音，请在系统设置中开启。', 'error');
       return;
@@ -345,15 +351,41 @@ export function ChatScreen({
     } catch (err) {
       removePendingUserMessage(pendingId);
       const message = extractErrorDetail(err);
-      setError(message);
-      // Voice turn failures (ASR/LLM errors reported by the server with a
-      // readable message) otherwise vanish above the message list.
       onNotice(`语音消息发送失败：${message}`, 'error');
     } finally {
       recorderActiveRef.current = false;
       stopStreamPump();
       setStreamingText('');
       setSending(false);
+    }
+  }
+
+  async function rateReply(message: MessageInfo, feedback: 'helpful' | 'unhelpful') {
+    if (feedbackSavingId !== null || !message.strategy_record) {
+      return;
+    }
+    setFeedbackSavingId(message.id);
+    try {
+      const result = await submitReplyFeedback(message.id, feedback);
+      setMessages(current => current.map(item =>
+        item.id === message.id && item.strategy_record
+          ? {...item, strategy_record: {...item.strategy_record, feedback: result.feedback}}
+          : item,
+      ));
+      if (feedback === 'unhelpful') {
+        onNotice(
+          result.technique_blocked
+            ? '已记录为无帮助，后续对话将避免使用这类支持方式。'
+            : '已记录为无帮助。',
+          'info',
+        );
+      } else {
+        onNotice('已记录为有帮助，感谢你的反馈。', 'success');
+      }
+    } catch (err) {
+      onNotice(`提交反馈失败：${extractErrorDetail(err)}`, 'error');
+    } finally {
+      setFeedbackSavingId(null);
     }
   }
 
@@ -388,7 +420,6 @@ export function ChatScreen({
     const mimeType = extension === '.m4a' ? 'audio/mp4' : 'audio/aac';
 
     setSending(true);
-    setError('');
     setStreamingText('');
     const pendingId = appendPendingUserMessage('语音消息（识别中…）');
     try {
@@ -405,7 +436,6 @@ export function ChatScreen({
     } catch (err) {
       removePendingUserMessage(pendingId);
       const message = extractErrorDetail(err);
-      setError(message);
       onNotice(`语音消息发送失败：${message}`, 'error');
     } finally {
       stopStreamPump();
@@ -437,13 +467,12 @@ export function ChatScreen({
       return;
     }
     setEnding(true);
-    setError('');
     try {
       await stopSpeaking();
       await endSession(sessionId);
       onEnded(sessionId);
     } catch (err) {
-      setError(extractErrorDetail(err));
+      onNotice(`结束会话失败：${extractErrorDetail(err)}`, 'error');
     } finally {
       setEnding(false);
     }
@@ -452,19 +481,22 @@ export function ChatScreen({
   const isActive = detail?.status === 'active';
 
   return (
-    <KeyboardAvoidingView style={ui.container} behavior="padding">
+    <KeyboardAvoidingView
+      style={ui.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'android' ? ANDROID_KEYBOARD_VERTICAL_OFFSET : 0}>
       <ScrollView ref={scrollRef} contentContainerStyle={chatStyles.content} keyboardShouldPersistTaps="handled">
         <StrategyPanel record={latestRecord} />
-        {error ? <Text style={ui.errorText}>{error}</Text> : null}
         <View style={{gap: 12}}>
           {messages.map(message => (
             <MessageBubble
               key={message.id}
               message={message}
               ttsPlaying={ttsPlayingId === message.id}
-              audioPlayingId={audioPlayingId}
+              feedback={message.strategy_record?.feedback ?? null}
+              feedbackDisabled={feedbackSavingId !== null}
               onPlayTts={target => void playTts(target)}
-              onPlayAudio={target => void playUserAudio(target)}
+              onFeedback={(target, feedback) => void rateReply(target, feedback)}
             />
           ))}
           {awaitingReply ? (
@@ -478,7 +510,7 @@ export function ChatScreen({
               </View>
             </View>
           ) : null}
-          {messages.length === 0 && !error && !awaitingReply ? <Text style={ui.hint}>说点什么开始这次对话吧。</Text> : null}
+          {messages.length === 0 && !awaitingReply ? <Text style={ui.hint}>说点什么开始这次对话吧。</Text> : null}
         </View>
       </ScrollView>
       {isActive ? (
@@ -506,11 +538,13 @@ export function ChatScreen({
           <View style={chatStyles.inputRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={recording ? '结束录音并发送' : '按住录音'}
+            accessibilityLabel={sending ? '正在发送语音消息' : recording ? '结束录音并发送' : '开始录音'}
+            disabled={sending}
             style={({pressed}) => [chatStyles.micButton, (recording || pressed) && chatStyles.micButtonActive]}
-            onPressIn={() => void startVoiceRecording()}
-            onPressOut={() => void finishVoiceRecording()}>
-            <Text style={chatStyles.micText}>{recording ? '⏺' : '🎤'}</Text>
+            // Tap once to start and tap again to stop. Using press-in/out made
+            // a normal first tap start and stop the recorder in one gesture.
+            onPress={() => void (recorderActiveRef.current ? finishVoiceRecording() : startVoiceRecording())}>
+            <Text style={chatStyles.micText}>{sending ? '…' : recording ? '⏺' : '🎤'}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"

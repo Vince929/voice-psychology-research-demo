@@ -22,10 +22,27 @@ class SessionCreate(BaseModel):
     concern: str = Field(min_length=1, max_length=255)
     expression_preference: Literal["gentle", "concise"]
     voice_reply_enabled: bool = True
+    # User-edited voice style (bonus). None = auto (server-derived each turn);
+    # never applied on safety escalations or high-anxiety/risk turns.
+    voice_profile_override: VoiceProfile | None = None
+
+
+class SessionPreferenceUpdate(BaseModel):
+    """PATCH /api/sessions/{id}/preferences body. voice_profile_override=null
+    clears the override back to auto."""
+
+    voice_profile_override: VoiceProfile | None = None
 
 
 class MessageTextRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+
+
+class ReplyFeedbackUpdate(BaseModel):
+    """User rating for an assistant reply. `unhelpful` blocks its technique
+    for the remainder of this session; safety escalation is never blocked."""
+
+    feedback: Literal["helpful", "unhelpful"]
 
 
 class ResponseConstraints(BaseModel):
@@ -59,7 +76,9 @@ class StrategyLLMOutput(BaseModel):
 
 class SummaryOutput(BaseModel):
     main_concern: str = Field(min_length=1, max_length=512)
-    key_feelings: list[str] = Field(min_length=1)
+    # The prompt explicitly allows an empty array ("无则空数组") for sessions
+    # where the user never expressed a feeling -- the schema must agree.
+    key_feelings: list[str] = Field(default_factory=list)
     techniques_used: list[str] = Field(default_factory=list)
     rejected_methods: list[str] = Field(default_factory=list)
     agreed_next_step: str = Field(min_length=1, max_length=512)

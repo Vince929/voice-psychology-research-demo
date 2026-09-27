@@ -1,3 +1,7 @@
 packages:
   - apps/*
   - packages/*
+
+patchedDependencies:
+  react-native-document-picker@9.3.1: patches/react-native-document-picker@9.3.1.patch
+  react-native-tts@4.1.1: patches/react-native-tts@4.1.1.patch

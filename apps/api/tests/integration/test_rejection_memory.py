@@ -29,7 +29,7 @@ def test_rejected_technique_is_not_reused(auth_client, active_session):
 def test_llm_channel_rejection_is_recorded(auth_client, active_session):
     # "这一步行动规划不适合我" — no regex channel hit is guaranteed for action_planning,
     # so this also exercises the LLM's user_rejected_technique channel when it fires.
-    response = send_message(auth_client, active_session, "换一种方式吧，我不想做计划。")
+    response = send_message(auth_client, active_session["id"], "换一种方式吧，我不想做计划。")
     assert response.status_code == 200, response.text
     detail = auth_client.get(f"/api/sessions/{active_session['id']}").json()
     # Either channel must have recorded the rejection by now.

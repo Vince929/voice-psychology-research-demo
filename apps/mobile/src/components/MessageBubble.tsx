@@ -7,13 +7,14 @@ import {colors} from './ui';
 type Props = {
   message: MessageInfo;
   ttsPlaying: boolean;
+  feedback: 'helpful' | 'unhelpful' | null;
+  feedbackDisabled: boolean;
   onPlayTts: (message: MessageInfo) => void;
-  onPlayAudio: (message: MessageInfo) => void;
-  audioPlayingId: number | null;
+  onFeedback: (message: MessageInfo, feedback: 'helpful' | 'unhelpful') => void;
 };
 
 /** Chat bubble. Assistant bubbles offer TTS replay with the recorded profile params. */
-export function MessageBubble({message, ttsPlaying, onPlayTts, onPlayAudio, audioPlayingId}: Props) {
+export function MessageBubble({message, ttsPlaying, feedback, feedbackDisabled, onPlayTts, onFeedback}: Props) {
   const isUser = message.role === 'user';
   return (
     <View style={[bubbleStyles.row, isUser ? bubbleStyles.rowUser : bubbleStyles.rowAssistant]}>
@@ -21,17 +22,26 @@ export function MessageBubble({message, ttsPlaying, onPlayTts, onPlayAudio, audi
         <Text style={isUser ? bubbleStyles.textUser : bubbleStyles.textAssistant}>{message.content}</Text>
       </View>
       <View style={bubbleStyles.actions}>
-        {isUser && message.audio_url ? (
-          <Pressable accessibilityRole="button" hitSlop={8} onPress={() => onPlayAudio(message)}>
-            <Text style={bubbleStyles.actionText}>
-              {audioPlayingId === message.id ? '停止播放 ◼' : '播放原声 ▶'}
-            </Text>
-          </Pressable>
-        ) : null}
         {!isUser ? (
-          <Pressable accessibilityRole="button" hitSlop={8} onPress={() => onPlayTts(message)}>
-            <Text style={bubbleStyles.actionText}>{ttsPlaying ? '停止播放 ◼' : '语音播放 ▶'}</Text>
-          </Pressable>
+          <>
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={() => onPlayTts(message)}>
+              <Text style={bubbleStyles.actionText}>{ttsPlaying ? '停止播放 ◼' : '语音播放 ▶'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={feedbackDisabled || feedback === 'helpful'}
+              hitSlop={8}
+              onPress={() => onFeedback(message, 'helpful')}>
+              <Text style={[bubbleStyles.feedbackText, feedback === 'helpful' && bubbleStyles.feedbackSelected]}>有帮助</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={feedbackDisabled || feedback === 'unhelpful'}
+              hitSlop={8}
+              onPress={() => onFeedback(message, 'unhelpful')}>
+              <Text style={[bubbleStyles.feedbackText, feedback === 'unhelpful' && bubbleStyles.feedbackSelected]}>无帮助</Text>
+            </Pressable>
+          </>
         ) : null}
       </View>
     </View>
@@ -49,4 +59,6 @@ const bubbleStyles = StyleSheet.create({
   textAssistant: {fontSize: 15, lineHeight: 23, color: colors.ink},
   actions: {flexDirection: 'row', gap: 14, paddingHorizontal: 4},
   actionText: {fontSize: 12, fontWeight: '800', color: colors.primary},
+  feedbackText: {fontSize: 12, fontWeight: '700', color: colors.muted},
+  feedbackSelected: {color: colors.primary, fontWeight: '800'},
 });

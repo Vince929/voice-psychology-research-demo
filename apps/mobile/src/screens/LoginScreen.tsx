@@ -2,7 +2,10 @@ import React, {useEffect, useState} from 'react';
 import {KeyboardAvoidingView, Platform, ScrollView, Text, View} from 'react-native';
 
 import {checkApiHealth, extractErrorDetail, login} from '../services/api';
-import {Field, PrimaryButton, colors, ui} from '../components/ui';
+import {Field, PrimaryButton, SecondaryButton, colors, ui} from '../components/ui';
+
+const DEMO_ACCOUNTS = ['demo1', 'demo2'];
+const DEMO_PASSWORD = 'Passw0rd!';
 
 export function LoginScreen({onLoggedIn}: {onLoggedIn: (username: string) => void}) {
   const [username, setUsername] = useState('');
@@ -59,6 +62,20 @@ export function LoginScreen({onLoggedIn}: {onLoggedIn: (username: string) => voi
           <Field label="密码" value={password} onChangeText={setPassword} placeholder="测试账号密码：Passw0rd!" secure />
           {error ? <Text style={ui.errorText}>{error}</Text> : null}
           <PrimaryButton label={submitting ? '登录中…' : '登录'} disabled={submitting} onPress={() => void submit()} />
+          <View style={{flexDirection: 'row', gap: 8}}>
+            {DEMO_ACCOUNTS.map(account => (
+              <SecondaryButton
+                key={account}
+                label={`快速填充 ${account}`}
+                disabled={submitting}
+                onPress={() => {
+                  setUsername(account);
+                  setPassword(DEMO_PASSWORD);
+                  setError('');
+                }}
+              />
+            ))}
+          </View>
           <Text style={[ui.hint, {textAlign: 'center', color: colors.muted}]}>
             验收测试账号：demo1 / demo2，密码 Passw0rd!
           </Text>

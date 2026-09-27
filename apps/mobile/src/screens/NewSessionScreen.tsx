@@ -47,7 +47,7 @@ export function NewSessionScreen({onCreated}: {onCreated: (session: SessionInfo)
         <Field label="或自行描述" value={customConcern} onChangeText={setCustomConcern} placeholder="填写后将优先使用" />
         <Choice
           label="期望的表达方式"
-          value={expressionPreference}
+          value={expressionPreference === 'concise' ? '简洁直接' : '温和陪伴'}
           choices={['温和陪伴', '简洁直接']}
           onChange={value => setExpressionPreference(value === '简洁直接' ? 'concise' : 'gentle')}
         />

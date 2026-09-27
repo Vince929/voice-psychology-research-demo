@@ -33,6 +33,9 @@ Usage: ./cmd.sh [command]
   metro                Start the React Native Metro server only
   package, apk         Build the Android release APK
   db:migrate           Apply pending versioned SQL migrations with Yoyo
+  db:up                Start a dedicated MySQL 8 container on port 33061 (pulls image on first run)
+  db:down              Stop and remove the dedicated MySQL container
+  db:reset             Recreate the dedicated MySQL container from scratch (data loss)
   seed                 Insert the two acceptance test accounts (seed.sql)
   test                 Run the pytest suite (apps/api/tests)
   help, -h, --help     Show this help
@@ -93,6 +96,57 @@ run_tests() {
   )
 }
 
+# Dedicated demo database (independent of any other project's MySQL).
+# Port 33061 avoids clashing with a local 3306 instance.
+DB_CONTAINER="voice-psych-mysql"
+DB_PORT="33061"
+DB_ROOT_PASSWORD="root123"
+DB_USER="voice"
+DB_PASSWORD="voice123"
+DB_NAME="voice_psychology_demo"
+DB_URL="mysql+pymysql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${DB_PORT}/${DB_NAME}?charset=utf8mb4"
+
+db_up() {
+  if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$DB_CONTAINER"; then
+    echo "Dedicated MySQL container '$DB_CONTAINER' is already running on port $DB_PORT."
+  else
+    podman rm "$DB_CONTAINER" >/dev/null 2>&1 || true
+    podman run -d --name "$DB_CONTAINER" \
+      -e MYSQL_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
+      -e MYSQL_DATABASE="$DB_NAME" \
+      -e MYSQL_USER="$DB_USER" \
+      -e MYSQL_PASSWORD="$DB_PASSWORD" \
+      -p "${DB_PORT}:3306" \
+      mysql:8
+  fi
+  echo "Waiting for MySQL to accept connections..."
+  for _ in $(seq 1 60); do
+    if nc -z 127.0.0.1 "$DB_PORT" 2>/dev/null; then
+      echo "MySQL is up on port $DB_PORT."
+      break
+    fi
+    sleep 2
+  done
+  cat <<EOF
+
+Dedicated database ready. To switch the backend to it, set in apps/api/.env:
+  DATABASE_URL=$DB_URL
+then run: ./cmd.sh db:migrate && ./cmd.sh seed
+EOF
+}
+
+db_down() {
+  podman stop "$DB_CONTAINER" >/dev/null 2>&1 || true
+  podman rm "$DB_CONTAINER" >/dev/null 2>&1 || true
+  echo "Dedicated MySQL container '$DB_CONTAINER' stopped and removed."
+}
+
+db_reset() {
+  db_down
+  db_up
+  echo "Fresh container started; schema is empty. Run ./cmd.sh db:migrate && ./cmd.sh seed next."
+}
+
 build_android_apk() {
   local gradle_wrapper="$MOBILE_DIR/android/gradlew"
   if [[ ! -x "$gradle_wrapper" ]]; then
@@ -141,6 +195,15 @@ case "${1:-api}" in
     ;;
   db:migrate)
     migrate_database
+    ;;
+  db:up)
+    db_up
+    ;;
+  db:down)
+    db_down
+    ;;
+  db:reset)
+    db_reset
     ;;
   help|-h|--help)
     usage

@@ -35,6 +35,23 @@ function Row({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
+function displayStrategySchema(record: StrategyRecordInfo): string {
+  return JSON.stringify(
+    {
+      anxiety_level: record.anxiety_level,
+      risk_level: record.risk_level,
+      observed_signals: record.observed_signals,
+      support_goal: record.support_goal,
+      technique: record.technique,
+      technique_reason: record.technique_reason,
+      response_constraints: record.response_constraints,
+      voice_profile: record.voice_profile,
+    },
+    null,
+    2,
+  );
+}
+
 /** Fixed light-weight strategy observation panel (collapsible, refreshed per turn). */
 export function StrategyPanel({record}: {record: StrategyRecordInfo | null}) {
   const [expanded, setExpanded] = useState(true);
@@ -65,9 +82,14 @@ export function StrategyPanel({record}: {record: StrategyRecordInfo | null}) {
               <Text key={`${signal}-${index}`} style={panelStyles.signal}>· {signal}</Text>
             ))}
           </Row>
+          <Row label="判断来源">
+            <Text style={panelStyles.value}>
+              {record.source === 'rule' ? 'rule（确定性规则，未经过 LLM）' : 'llm（模型结构化判断）'}
+            </Text>
+          </Row>
           <Row label="本轮策略">
             <Text style={panelStyles.value}>
-              {TECHNIQUE_LABELS[record.technique] ?? record.technique} · 目标：{record.support_goal}
+              {TECHNIQUE_LABELS[record.technique] ?? record.technique}（{record.technique}） · 目标：{record.support_goal}
             </Text>
           </Row>
           <Row label="选择理由">
@@ -84,15 +106,22 @@ export function StrategyPanel({record}: {record: StrategyRecordInfo | null}) {
               {record.tts_params.inter_sentence_pause_ms}ms
             </Text>
           </Row>
-          {record.avoided_techniques.length > 0 ? (
-            <Row label="避开方法">
-              {record.avoided_techniques.map(item => (
+          <Row label="避开方法">
+            {record.avoided_techniques.length > 0 ? (
+              record.avoided_techniques.map(item => (
                 <Text key={item.technique} style={panelStyles.value}>
-                  · {TECHNIQUE_LABELS[item.technique] ?? item.technique}：{item.reason}
+                  · {TECHNIQUE_LABELS[item.technique] ?? item.technique}（{item.technique}）：{item.reason}
                 </Text>
-              ))}
-            </Row>
-          ) : null}
+              ))
+            ) : (
+              <Text style={ui.hint}>本次会话暂无被用户拒绝的方法。</Text>
+            )}
+          </Row>
+          <Row label="本轮策略记录 Schema">
+            <Text selectable style={panelStyles.schema}>
+              {displayStrategySchema(record)}
+            </Text>
+          </Row>
         </View>
       ) : null}
     </View>
@@ -110,4 +139,5 @@ const panelStyles = StyleSheet.create({
   rowValue: {gap: 2},
   signal: {fontSize: 13, lineHeight: 19, color: colors.body},
   value: {fontSize: 13, lineHeight: 19, color: colors.ink},
+  schema: {fontFamily: 'monospace', fontSize: 11, lineHeight: 17, color: '#20342C', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#C9D9CD', borderRadius: 8, padding: 10},
 });

@@ -1,12 +1,15 @@
 """Session summary generation (DeepSeek + strict Pydantic validation)."""
 
 import json
+import logging
 
 from pydantic import ValidationError
 
 from .analysis_services import ExternalServiceError, call_deepseek_json
 from .models import ChatSession
 from .schemas import SummaryOutput
+
+logger = logging.getLogger(__name__)
 
 SUMMARY_SYSTEM_PROMPT = (
     "你是一个 AI 心理支持会话的总结助手。基于给定的会话偏好、完整对话记录、每轮支持策略记录与用户拒绝的方法，"
@@ -47,8 +50,15 @@ def generate_summary(session: ChatSession, llm_call=call_deepseek_json) -> dict:
     raw, _request_id = llm_call(SUMMARY_SYSTEM_PROMPT, user_content)
     try:
         summary = SummaryOutput.model_validate(raw).model_dump()
-    except ValidationError:
+    except ValidationError as error:
         # One corrective retry with the validation error spelled out.
+        logger.warning(
+            "summary validation failed, retrying: %s",
+            "; ".join(
+                f"{'.'.join(str(p) for p in issue['loc'])}: {issue['msg']}"
+                for issue in error.errors()[:5]
+            ),
+        )
         followup = [
             {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False)},
             {"role": "user", "content": "上一次输出未通过校验，请严格按字段与枚举要求重新输出完整 JSON。"},

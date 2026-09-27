@@ -20,6 +20,13 @@ ASR_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID") or os.getenv("AUDIO_COS_SECR
 ASR_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY") or os.getenv("AUDIO_COS_SECRET_KEY", "")
 TENCENTCLOUD_APP_ID = os.getenv("TENCENTCLOUD_APP_ID", "")
 
+# Optional pin of asr.cloud.tencent.com to a fixed mainland Tencent edge IP.
+# The flash ASR route only exists on Tencent's mainland edge (e.g. Beijing CLB).
+# On networks whose DNS view is overseas the domain resolves to Tencent's
+# overseas edge, where /asr/flash/v1/<appid> returns nginx 404 and every voice
+# message fails. Empty = normal DNS resolution.
+ASR_RESOLVE_IP = os.getenv("ASR_RESOLVE_IP", "").strip()
+
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
