@@ -8,6 +8,7 @@ apps/api/.venv
 apps/api/__pycache__
 apps/api/app/__pycache__
 apps/api/.env
+apps/api/.env.local
 apps/api/demo.db
 apps/api/upload_audio
 data

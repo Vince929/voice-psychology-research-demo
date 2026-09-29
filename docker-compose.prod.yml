@@ -7,7 +7,7 @@ services:
     ports:
       - "8443:8000"
     env_file:
-      - apps/api/.env
+      - apps/api/.env.prod
     restart: unless-stopped
     networks:
       - voice-psychology-net
@@ -20,7 +20,7 @@ services:
     container_name: voice-psychology-worker
     command: ["python", "-m", "app.worker"]
     env_file:
-      - apps/api/.env
+      - apps/api/.env.prod
     restart: unless-stopped
     networks:
       - voice-psychology-net

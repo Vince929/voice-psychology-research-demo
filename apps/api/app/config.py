@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / ".env.local")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 if not DATABASE_URL:
@@ -14,10 +14,9 @@ JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = max(1, int(os.getenv("JWT_EXPIRE_HOURS", "24")))
 
-# Tencent Cloud Flash ASR credentials. The legacy variable names are kept as
-# fallbacks so an existing local .env keeps working after the rebranding.
-ASR_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID") or os.getenv("AUDIO_COS_SECRET_ID", "")
-ASR_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY") or os.getenv("AUDIO_COS_SECRET_KEY", "")
+# Tencent Cloud Flash ASR credentials.
+ASR_SECRET_ID = os.getenv("TENCENT_SECRET_ID", "")
+ASR_SECRET_KEY = os.getenv("TENCENT_SECRET_KEY", "")
 TENCENTCLOUD_APP_ID = os.getenv("TENCENTCLOUD_APP_ID", "")
 
 # Optional pin of asr.cloud.tencent.com to a fixed mainland Tencent edge IP.

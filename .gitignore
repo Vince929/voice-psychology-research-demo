@@ -8,9 +8,11 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# Environment and local data
+# Local environment and data
 .env
 apps/api/.env
+apps/api/.env.local
+# apps/api/.env.prod only contains non-sensitive production settings and is versioned.
 apps/api/demo.db
 apps/api/upload_audio/
 
