@@ -24,6 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Secrets: SERVER_HOST, SERVER_USER, SERVER_SSH_KEY, DATABASE_URL,
+      # JWT_SECRET, TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY,
+      # DEEPSEEK_API_KEY. Variables: JWT_EXPIRE_HOURS, TENCENTCLOUD_APP_ID,
+      # ASR_RESOLVE_IP, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, DEBUG_LLM_PROMPT.
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -48,34 +52,47 @@ jobs:
             upsert_env() {
               key="$1"
               value="$2"
-              if grep -q "^${key}=" "$ENV_FILE"; then
-                sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-              else
-                printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+              tmp_file="$(mktemp "${ENV_FILE}.XXXXXX")"
+              grep -v "^${key}=" "$ENV_FILE" > "$tmp_file" || true
+              printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+              mv "$tmp_file" "$ENV_FILE"
+              chmod 600 "$ENV_FILE"
+            }
+
+            require_value() {
+              key="$1"
+              value="$2"
+              if [[ -z "$value" ]]; then
+                echo "GitHub Secret or Variable ${key} must be configured" >&2
+                exit 1
               fi
             }
 
-            upsert_env "AUDIO_COS_BUCKET" "${{ vars.AUDIO_COS_BUCKET }}"
-            upsert_env "AUDIO_COS_REGION" "${{ vars.AUDIO_COS_REGION }}"
-            upsert_env "AUDIO_COS_SECRET_ID" "${{ vars.AUDIO_COS_SECRET_ID }}"
-            upsert_env "AUDIO_COS_SECRET_KEY" "${{ vars.AUDIO_COS_SECRET_KEY }}"
-            upsert_env "AUDIO_COS_KEY_PREFIX" "${{ vars.AUDIO_COS_KEY_PREFIX }}"
-            upsert_env "TENCENTCLOUD_APP_ID" "${{ vars.TENCENTCLOUD_APP_ID }}"
-            upsert_env "DEEPSEEK_API_KEY" "${{ vars.DEEPSEEK_API_KEY }}"
-            upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
-            upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
+            # GitHub is the production configuration source of truth. Every
+            # deployment replaces persisted values so key rotations take effect.
+            require_value "DATABASE_URL" "${{ secrets.DATABASE_URL }}"
+            require_value "JWT_SECRET" "${{ secrets.JWT_SECRET }}"
+            require_value "TENCENTCLOUD_SECRET_ID" "${{ secrets.TENCENTCLOUD_SECRET_ID }}"
+            require_value "TENCENTCLOUD_SECRET_KEY" "${{ secrets.TENCENTCLOUD_SECRET_KEY }}"
+            require_value "TENCENTCLOUD_APP_ID" "${{ vars.TENCENTCLOUD_APP_ID }}"
+            require_value "DEEPSEEK_API_KEY" "${{ secrets.DEEPSEEK_API_KEY }}"
 
-            # GitHub Secrets take precedence over Variables so every deployment replaces any
-            # stale server-side value. The shared MySQL master is reachable from containers by
-            # its Docker service name, not by the container-local 127.0.0.1 address.
-            DATABASE_URL_VALUE="${{ secrets.DATABASE_URL || vars.DATABASE_URL }}"
-            if [[ -z "$DATABASE_URL_VALUE" ]]; then
-              echo "GitHub DATABASE_URL Secret or Variable must be configured" >&2
-              exit 1
-            fi
-            DATABASE_URL_VALUE="${DATABASE_URL_VALUE/#mysql:\/\//mysql+pymysql://}"
+            # The shared MySQL master is reachable from containers by its Docker
+            # service name, not by the container-local 127.0.0.1 address.
+            DATABASE_URL_VALUE="${{ secrets.DATABASE_URL }}"
+            DATABASE_URL_VALUE="${DATABASE_URL_VALUE/#mysql:\/\//mysql+pymysql:\/\/}"
             DATABASE_URL_VALUE="$(printf '%s' "$DATABASE_URL_VALUE" | sed -E 's#@(127\.0\.0\.1|mysql):3306/#@mysql-master:3306/#')"
             upsert_env "DATABASE_URL" "$DATABASE_URL_VALUE"
+            upsert_env "JWT_SECRET" "${{ secrets.JWT_SECRET }}"
+            upsert_env "JWT_EXPIRE_HOURS" "${{ vars.JWT_EXPIRE_HOURS }}"
+            upsert_env "TENCENTCLOUD_SECRET_ID" "${{ secrets.TENCENTCLOUD_SECRET_ID }}"
+            upsert_env "TENCENTCLOUD_SECRET_KEY" "${{ secrets.TENCENTCLOUD_SECRET_KEY }}"
+            upsert_env "TENCENTCLOUD_APP_ID" "${{ vars.TENCENTCLOUD_APP_ID }}"
+            upsert_env "ASR_RESOLVE_IP" "${{ vars.ASR_RESOLVE_IP }}"
+            upsert_env "DEEPSEEK_API_KEY" "${{ secrets.DEEPSEEK_API_KEY }}"
+            upsert_env "DEEPSEEK_BASE_URL" "${{ vars.DEEPSEEK_BASE_URL }}"
+            upsert_env "DEEPSEEK_MODEL" "${{ vars.DEEPSEEK_MODEL }}"
+            upsert_env "DEBUG_LLM_PROMPT" "${{ vars.DEBUG_LLM_PROMPT }}"
 
             export STARLOG_NETWORK="$(docker inspect --format '{{range $network, $_ := .NetworkSettings.Networks}}{{$network}}{{end}}' starlog-mysql-master)"
             if [[ -z "$STARLOG_NETWORK" ]]; then
