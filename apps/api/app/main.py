@@ -415,7 +415,11 @@ def get_message_audio(
     audio_file = (UPLOAD_AUDIO_DIR / message.audio_path).resolve()
     if not str(audio_file).startswith(str(UPLOAD_AUDIO_DIR.resolve())) or not audio_file.is_file():
         raise HTTPException(status_code=404, detail="未找到该语音消息。")
-    return FileResponse(audio_file, media_type="audio/mp4")
+    return FileResponse(
+        audio_file,
+        media_type="audio/mp4",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @app.post("/api/sessions/{session_id}/end")
