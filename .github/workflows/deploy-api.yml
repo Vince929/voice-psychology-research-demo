@@ -27,13 +27,24 @@ jobs:
       - name: Load deployment target
         id: deployment_target
         shell: bash
+        env:
+          DEPLOY_SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           set -euo pipefail
           set -a
           . apps/api/.env.prod
           set +a
-          test -n "${SERVER_HOST:-}" && test "$SERVER_HOST" != "your-server-host"
-          test -n "${SERVER_USER:-}" && test "$SERVER_USER" != "your-server-user"
+
+          SERVER_USER="$DEPLOY_SERVER_USER"
+          if [[ -z "${SERVER_HOST:-}" || "$SERVER_HOST" == "your-server-host" ]]; then
+            echo "Configure SERVER_HOST in apps/api/.env.prod" >&2
+            exit 1
+          fi
+          if [[ -z "$SERVER_USER" || "$SERVER_USER" == "your-server-user" ]]; then
+            echo "Configure GitHub Actions secret SERVER_USER" >&2
+            exit 1
+          fi
+
           echo "server_host=$SERVER_HOST" >> "$GITHUB_OUTPUT"
           echo "server_user=$SERVER_USER" >> "$GITHUB_OUTPUT"
 
