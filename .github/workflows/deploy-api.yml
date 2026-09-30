@@ -69,7 +69,19 @@ jobs:
             cd "$APP_DIR"
             # Deploy the exact revision that triggered this workflow. This also
             # lets manual branch deployments use their versioned .env.prod.
-            git fetch --depth=1 origin "$DEPLOY_SHA"
+            # The server's outbound TLS connection to GitHub can be transiently
+            # interrupted, so retry the network-only fetch before failing.
+            for attempt in 1 2 3; do
+              if git fetch --depth=1 origin "$DEPLOY_SHA"; then
+                break
+              fi
+              if [[ "$attempt" == "3" ]]; then
+                echo "Unable to fetch deployment revision after 3 attempts" >&2
+                exit 1
+              fi
+              echo "Fetch attempt $attempt failed; retrying in 5 seconds..." >&2
+              sleep 5
+            done
             git checkout --detach FETCH_HEAD
             git restore apps/api/.env.prod
 
