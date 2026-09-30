@@ -48,6 +48,7 @@ jobs:
       # apps/api/.env.prod: SERVER_HOST, SERVER_USER. Secrets: SERVER_SSH_KEY,
       # DATABASE_URL, JWT_SECRET, TENCENT_SECRET_ID, TENCENT_SECRET_KEY, DEEPSEEK_API_KEY.
       # Non-sensitive runtime settings are versioned in apps/api/.env.prod.
+      # The remote host deploys the exact revision that triggered this workflow.
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -58,17 +59,19 @@ jobs:
             set -e
             APP_DIR="$HOME/voice-psychology-research-demo"
             REPOSITORY_URL="${{ github.server_url }}/${{ github.repository }}.git"
+            DEPLOY_REF="${{ github.ref_name }}"
+            DEPLOY_SHA="${{ github.sha }}"
 
             if [[ ! -d "$APP_DIR/.git" ]]; then
-              git clone --branch master --single-branch "$REPOSITORY_URL" "$APP_DIR"
+              git clone --branch "$DEPLOY_REF" --single-branch "$REPOSITORY_URL" "$APP_DIR"
             fi
 
             cd "$APP_DIR"
-            # .env.prod is versioned for non-sensitive settings. Restore its
-            # tracked content before pulling because the previous deployment
-            # injected credentials into the working copy.
+            # Deploy the exact revision that triggered this workflow. This also
+            # lets manual branch deployments use their versioned .env.prod.
+            git fetch --depth=1 origin "$DEPLOY_SHA"
+            git checkout --detach FETCH_HEAD
             git restore apps/api/.env.prod
-            git pull --ff-only origin master
 
             ENV_FILE="apps/api/.env.prod"
             touch "$ENV_FILE"
