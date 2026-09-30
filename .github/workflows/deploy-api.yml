@@ -18,7 +18,8 @@ jobs:
   deploy:
     name: Build and Deploy API
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The first remote Docker build may download ffmpeg and Python dependencies.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -55,6 +56,7 @@ jobs:
           host: ${{ steps.deployment_target.outputs.server_host }}
           username: ${{ steps.deployment_target.outputs.server_user }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 40m
           script: |
             set -e
             APP_DIR="$HOME/voice-psychology-research-demo"
