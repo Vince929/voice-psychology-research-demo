@@ -28,6 +28,7 @@ usage() {
 Usage: ./cmd.sh [command]
 
   (no args), api       Start the FastAPI service at http://127.0.0.1:8000
+                       (stops any instance already listening on 8000 first)
   mobile, android      Build, install and start the Android app in emulator mode
   usb                  Configure USB port reverse and start the Android app on a device
   metro                Start the React Native Metro server only
@@ -106,12 +107,31 @@ DB_PASSWORD="voice123"
 DB_NAME="voice_psychology_demo"
 DB_URL="mysql+pymysql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${DB_PORT}/${DB_NAME}?charset=utf8mb4"
 
+# Use Docker when its daemon is reachable (Docker Desktop / colima), otherwise Podman.
+container_cli() {
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    echo docker
+  elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+    echo podman
+  else
+    echo ""
+  fi
+}
+
 db_up() {
-  if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$DB_CONTAINER"; then
+  local cli
+  cli="$(container_cli)"
+  if [[ -z "$cli" ]]; then
+    echo "Neither a running Docker daemon nor Podman is available." >&2
+    echo "Start Docker Desktop (or 'colima start'), then retry ./cmd.sh db:up" >&2
+    exit 1
+  fi
+  echo "Using container runtime: $cli"
+  if $cli ps --format '{{.Names}}' 2>/dev/null | grep -qx "$DB_CONTAINER"; then
     echo "Dedicated MySQL container '$DB_CONTAINER' is already running on port $DB_PORT."
   else
-    podman rm "$DB_CONTAINER" >/dev/null 2>&1 || true
-    podman run -d --name "$DB_CONTAINER" \
+    $cli rm "$DB_CONTAINER" >/dev/null 2>&1 || true
+    $cli run -d --name "$DB_CONTAINER" \
       -e MYSQL_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
       -e MYSQL_DATABASE="$DB_NAME" \
       -e MYSQL_USER="$DB_USER" \
@@ -136,8 +156,14 @@ EOF
 }
 
 db_down() {
-  podman stop "$DB_CONTAINER" >/dev/null 2>&1 || true
-  podman rm "$DB_CONTAINER" >/dev/null 2>&1 || true
+  local cli
+  cli="$(container_cli)"
+  if [[ -z "$cli" ]]; then
+    echo "Neither a running Docker daemon nor Podman is available; nothing to stop." >&2
+    return 0
+  fi
+  $cli stop "$DB_CONTAINER" >/dev/null 2>&1 || true
+  $cli rm "$DB_CONTAINER" >/dev/null 2>&1 || true
   echo "Dedicated MySQL container '$DB_CONTAINER' stopped and removed."
 }
 
@@ -161,11 +187,52 @@ build_android_apk() {
   echo "Release APK: $MOBILE_DIR/android/app/build/outputs/apk/release/app-release.apk"
 }
 
+API_PORT="8000"
+
+# Stop a previous instance of this API so `./cmd.sh api` always restarts cleanly
+# instead of failing with "Address already in use".
+free_api_port() {
+  local pids
+  pids="$(lsof -tiTCP:"$API_PORT" -sTCP:LISTEN 2>/dev/null || true)"
+  [[ -z "$pids" ]] && return 0
+
+  local pid
+  for pid in $pids; do
+    local command_name
+    command_name="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    case "$command_name" in
+      *python*|*Python*|*uvicorn*) ;;
+      *)
+        echo "Port $API_PORT is held by an unrelated process (PID $pid: ${command_name:-unknown})." >&2
+        echo "Stop it manually, then retry." >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  echo "Port $API_PORT is already in use (PID: $(echo "$pids" | tr '\n' ' ')); stopping the previous instance..."
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    if ! lsof -tiTCP:"$API_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "Previous instance stopped."
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "Graceful shutdown timed out; sending SIGKILL." >&2
+  # shellcheck disable=SC2086
+  kill -9 $pids 2>/dev/null || true
+  sleep 1
+}
+
 start_api() {
   require_venv
   migrate_database
+  free_api_port
   cd "$API_DIR"
-  exec .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+  exec .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port "$API_PORT"
 }
 
 case "${1:-api}" in
